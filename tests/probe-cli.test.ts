@@ -115,6 +115,12 @@ test("fixture CLI rejects unknown, duplicate, and missing option values", () => 
       ["--fixtures-only", "--output", "first.json", "--output", "second.json"],
       ["--fixtures-only", "--output"],
       ["--fixtures-only", "--output", "--"],
+      ["--fixtures-only", "--schemas-only"],
+      ["--schemas-only", "--model", "gpt-synthetic"],
+      ["--isolated-lifecycle"],
+      ["--fixtures-only", "--codex", "codex"],
+      ["--schemas-only", "--codex", "first", "--codex", "second"],
+      ["--isolated-lifecycle", "--model"],
       ["--unexpected-positional"]
     ];
     for (const args of cases) {
@@ -142,7 +148,7 @@ test("fixture CLI removes its temporary file when the atomic rename fails", () =
 
     assert.equal(result.status, 1);
     assert.equal(result.stdout, "");
-    assert.equal(result.stderr, "ERROR: unable to write fixture report\n");
+    assert.equal(result.stderr, "ERROR: unable to write probe report\n");
     assert.deepEqual(fs.readdirSync(directory), ["output-directory"]);
     assert.deepEqual(fs.readdirSync(outputDirectory), []);
   });

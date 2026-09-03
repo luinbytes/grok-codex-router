@@ -28,10 +28,11 @@ printVerdict(report);
 
 ```sh
 bun run probe:bridges -- --fixtures-only
-bun run probe:bridges
+bun run probe:bridges -- --schemas-only
+bun run probe:bridges -- --isolated-lifecycle --model gpt-5.6-sol
 ```
 
-Fixture mode never starts a process, reads authentication state, accesses the network, or records wall-clock timing. Live mode owns subprocesses and closes them after each serial scenario.
+Fixture mode never starts a process, reads authentication state, accesses the network, or records wall-clock timing. Schema and isolated-lifecycle modes own their subprocesses and close them before writing a receipt. Every mode remains release-blocked.
 
 ## Data shape
 
@@ -49,8 +50,11 @@ A continuation event records only whether instructions, model, tool schema, and 
 
 - `scripts/probes/bridge-contract.ts` owns domain types, the scenario registry, the pure reducer, eligibility, and safe-report projection.
 - `scripts/probes/direct-candidate.ts` replays checked-in redacted semantic fixtures. It has no live mode.
-- `scripts/probes/app-server-candidate.ts` owns stdio framing, Codex child lifecycle, request correlation, schema inspection, and strict JSON-RPC parsing for dynamic and MCP modes.
-- `scripts/probes/codex-bridge-probe.ts` parses CLI arguments, composes candidates, writes a safe JSON report, prints the five verdict fields, and sets the exit code.
+- `scripts/probes/app-server-candidate.ts` owns strict JSON-RPC parsing, semantic normalization, and the scoped request and call identity ledger.
+- `scripts/probes/app-server-stdio.ts` owns bounded JSONL framing, Codex child lifecycle, response correlation, dynamic-tool responses, and isolated lifecycle receipts.
+- `scripts/probes/app-server-schema.ts` generates and inspects version-specific stable and experimental schema bundles without checking them in.
+- `scripts/probes/codex-process.ts` owns the small environment allowlist used by probes that must not inherit user credentials or configuration.
+- `scripts/probes/codex-bridge-probe.ts` parses CLI arguments, composes candidates, writes safe fixture, schema, or isolated-lifecycle reports, prints the five verdict fields, and sets the exit code.
 - `tests/fixtures/bridge-events.ts` stores deterministic semantic traces and raw rejection cases. TypeScript keeps the fixtures in the compiled test tree without changing the build.
 - `tests/transport-contract.test.ts` proves all ten scenarios, every forbidden event, redaction, and deterministic fixture output.
 - `docs/transport-decision.md` records measured facts. It begins blocked and never claims a selected bridge before live evidence exists.
@@ -71,11 +75,21 @@ Any command, file, terminal, web, approval, built-in tool, unexpected MCP, or un
 
 The parser keeps JSON-RPC request IDs separate from Grok tool-call IDs. A parser-owned ledger reserves each call with its thread and turn before exposing a handoff, then rejects reused identities, cross-turn completion, or duplicate completion notifications. Tool arguments accept JSON objects only, with fixed byte, depth, and node ceilings. IDs, deltas, and protocol results are bounded before normalization. Each rejection carries a semantic failure event so the evaluator cannot drop it silently.
 
-Thread startup is a safety receipt, not a generic acknowledgement. The response must match the requested model, `never` approval policy, and a read-only sandbox with network disabled. Model discovery emits only a `model-available` lifecycle receipt. The live candidate must combine that receipt with its item audit before it emits the contract's Grok-only inventory event.
+Thread startup is a safety receipt, not a generic acknowledgement. The response must match the requested working directory, model, OpenAI provider, `user` reviewer, `never` approval policy, empty runtime roots, ephemeral state, and a read-only sandbox with network disabled. Model discovery emits only a `model-available` lifecycle receipt. The live candidate must combine that receipt with its item audit before it emits the contract's Grok-only inventory event.
 
-The dynamic candidate supports flat Grok tool names only. A non-null dynamic namespace is unsupported and fails as unexpected MCP traffic. The current parser accepts already-parsed values; live stdio framing must enforce a raw-byte ceiling before `JSON.parse()` so an oversized line cannot bypass the in-memory limits.
+The dynamic candidate supports flat Grok tool names only. A non-null dynamic namespace is unsupported and fails as unexpected MCP traffic. The stdio client enforces a raw-byte ceiling before UTF-8 decoding and `JSON.parse()`. It requires newline termination, bounds queued messages, tool results, and stderr, keeps stdout separate from diagnostics, correlates each response, and owns bounded TERM/KILL shutdown. Operations are serialized. Lifecycle notifications received before their response remain bounded until the response establishes their thread or turn identity.
 
-Live mode generates the installed Codex stable and experimental schema bundles in a temporary directory. It records the CLI version and bundle hashes, then confirms that `dynamicTools` exists only on the experimental `ThreadStartParams`. The adapter does not check in the full generated schema and adds no runtime validation package.
+Notifications may carry a top-level server emission timestamp. The parser accepts it only as a bounded non-negative integer. The parser consumes a disabled remote-control status without retaining its installation identity. An enabled status fails closed.
+
+Codex reports thread origin and caller-supplied analytics source separately. The 0.151.0 schema makes `threadSource` optional, but the observed correlated App Server response reported `source: "vscode"` with `threadSource: "appServer"`. The parser accepts the schema-native `source: "appServer"` shape with no conflicting analytics value. It also accepts that exact 0.151.0 compatibility pair. It rejects every other origin pair and never exposes either field.
+
+Live mode generates the installed Codex stable and experimental schema bundles in a temporary directory. Each bounded command runs in an owned POSIX process group so a timeout also terminates wrapper descendants. The probe records the CLI version and bundle hashes, parses both complete bundles, then confirms that only the experimental `ThreadStartParams` contains the expected `dynamicTools` shape. The adapter does not check in the full generated schema and adds no runtime validation package.
+
+The isolated lifecycle command creates an empty temporary Codex home and workspace. It passes only a small environment allowlist. It sends a thread request containing the dynamic-tool specification, validates the returned thread policy, audits post-start notifications until a short quiet interval, starts no turn, closes its direct child, and removes the temporary tree before returning. POSIX launches use an owned process group for descendant teardown. Live process probes refuse Windows until the project has Job Object or equivalent process-tree containment. The receipt proves that the thread request completed and that local framing is compatible while remaining signed out. It does not prove dynamic-tool registration or execution, subscription authentication, or native Grok ownership.
+
+Production integration still needs a tool-result callback. `PromptExecutor.stream()` returns Grok-visible tool requests but gives an App Server client no way to receive Grok's result. GCR-1 must design and prove that callback in the native Sand before any production transport import.
+
+The probe client accepts only protocol-bounded dynamic result content. The future native callback must separately enforce trusted attachment roots, media types, and privacy policy before it can construct text, image, or audio output.
 
 ## Tradeoffs
 

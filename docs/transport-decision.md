@@ -23,16 +23,18 @@ The generated schemas do not set safe limits for arbitrary tool arguments or pro
 
 The model-list parser returns only a `model-available` lifecycle receipt when the requested model appears in the bounded App Server catalog. It does not emit the contract's Grok-only inventory event. A live candidate may emit that event only after its item audit separately proves that Codex avoided built-in tools.
 
-This candidate currently permits flat dynamic tool names only; non-null namespaces fail closed. The live stdio reader must enforce its byte ceiling before JSON parsing. Until that framing gate and the authenticated trials exist, the parser remains evidence rather than a selectable transport.
+This candidate permits flat dynamic tool names only. Non-null namespaces fail closed. Its JSONL reader enforces a raw-byte ceiling before decoding and parsing. The reader also bounds queued messages and diagnostics, separates stdout from stderr, correlates responses, and owns bounded shutdown. The process client and parser remain evidence rather than a selectable transport.
 
-The deterministic direct fixture now passes all ten contract scenarios. The saved fixture receipt ends with `SELECTED_BRIDGE=none` and `RELEASE_GATE=BLOCKED`. The focused parser, CLI, and contract suite passes 22 tests. The complete non-live suite passes 48 tests with Knip, TypeScript build, and the telemetry check clean. The repository-wide check passes 49 of 52 tests; its only failures are the same three live VM contracts unavailable in this macOS worktree. This proves the evaluator, safe parser boundary, and baseline fixture only. It does not prove an App Server candidate or authorize a release.
+The installed-schema receipt parses and hashes both 0.151.0 protocol bundles. Only the experimental `ThreadStartParams` exposes a valid `dynamicTools` schema. The isolated lifecycle probe passed initialize, signed-out account status, model discovery, and ephemeral read-only no-network thread creation after sending a dynamic-tool specification. It uses an empty temporary Codex home and workspace. It inherits no credential variables, audits post-start notifications to a quiet interval, starts no turn, and returns only after direct-child shutdown and temporary cleanup. It does not prove that Codex registered or invoked the tool.
+
+The deterministic direct fixture still passes all ten contract scenarios. Every saved receipt ends with `SELECTED_BRIDGE=none` and `RELEASE_GATE=BLOCKED`. The focused parser, stdio, schema, CLI, and contract suite passes 42 tests. The complete non-live suite passes 68 tests with Knip, TypeScript build, and the telemetry check clean. The repository-wide check passes 69 of 72 tests. Its only failures are the same three live VM contracts unavailable in this macOS worktree. These results prove the evaluator, the bounded local process code, the isolated lifecycle, and the baseline fixture. They do not prove an authenticated App Server candidate or authorize a release.
 
 ## Candidate state
 
 | Candidate | Purpose | Current result | Release eligibility |
 | --- | --- | --- | --- |
 | Direct Responses | Fixture and performance baseline | Deterministic replay passes all ten fixture scenarios. No live GCR-1 benchmark has run. | Never eligible. It reads and refreshes credentials outside Codex CLI. |
-| App Server dynamic tools | Primary stdio candidate | Pure deny-by-default parsing passes; no App Server process or authenticated Grok Sand trial has run. | Blocked. It may qualify for alpha only after every live case passes. |
+| App Server dynamic tools | Primary stdio candidate | Bounded process and isolated signed-out thread lifecycle pass. No dynamic tool turn or authenticated native Grok turn has run. | Blocked. It may qualify for alpha only after every live case passes. |
 | App Server MCP | Research comparison | No passive ownership proof exists. | Blocked. Fixture evidence cannot promote it. |
 
 ## Selection rules
@@ -48,11 +50,14 @@ If no App Server candidate passes, the program stops. It does not fall back to t
 ## Evidence still required
 
 - Authenticated App Server stdio trials through Grok's native control path.
+- An authenticated-mode isolation boundary that prevents configured MCP startup rather than hiding its notifications.
 - A native image-input subcase that preserves the trusted attachment and redaction contract without exposing bytes or paths in the report.
 - One and two-tool turns that prove Grok is the only executor.
 - Continuation, cancellation, malformed-result, and restart trials.
 - Model discovery and a deny-by-default raw event audit.
 - Interleaved latency and memory measurements against the direct baseline.
+- A reverse tool-result handoff from Grok's executor into the App Server request lifecycle.
+- Windows Job Object or equivalent process-tree containment before enabling live probes there.
 
 The native-image result reported for `bugfix/grokbot-local-image-attachments` is separate evidence. It cannot select an App Server bridge, and the uncommitted worktree must not be copied or merged. Reconcile it only after that fix has a stable commit.
 

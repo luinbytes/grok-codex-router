@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "mode": "isolated-lifecycle",
+  "reports": [
+    {
+      "candidate": "direct",
+      "evidence": "fixture",
+      "protocol": "direct-fixture",
+      "authenticationOwner": "external",
+      "scenarios": [
+        {
+          "scenario": "authentication-status",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 2
+        },
+        {
+          "scenario": "plain-text",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 2
+        },
+        {
+          "scenario": "one-tool",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 3
+        },
+        {
+          "scenario": "parallel-tools",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 5
+        },
+        {
+          "scenario": "stream-order",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 3
+        },
+        {
+          "scenario": "continuation",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 2
+        },
+        {
+          "scenario": "cancellation",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 3
+        },
+        {
+          "scenario": "malformed-tool-results",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 3
+        },
+        {
+          "scenario": "restart-behavior",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 3
+        },
+        {
+          "scenario": "model-and-tool-inventory",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 2
+        }
+      ],
+      "releaseEligibility": "baseline-only"
+    }
+  ],
+  "decision": {
+    "BASELINE_BRIDGE": "direct",
+    "SELECTED_BRIDGE": "none",
+    "STABLE_RELEASE": "blocked",
+    "ALPHA_RELEASE": "blocked",
+    "RELEASE_GATE": "BLOCKED"
+  },
+  "lifecycle": {
+    "candidate": "app-server-dynamic",
+    "protocol": "stdio-jsonl",
+    "authenticationOwner": "codex",
+    "authenticationStatus": "signed-out",
+    "modelStatus": "available",
+    "threadPolicy": "ephemeral-read-only-no-network",
+    "threadStart": "accepted",
+    "postStartAudit": "quiet",
+    "directProcess": "closed",
+    "releaseEligibility": "blocked"
+  }
+}

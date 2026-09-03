@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "mode": "schemas-only",
+  "reports": [
+    {
+      "candidate": "direct",
+      "evidence": "fixture",
+      "protocol": "direct-fixture",
+      "authenticationOwner": "external",
+      "scenarios": [
+        {
+          "scenario": "authentication-status",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 2
+        },
+        {
+          "scenario": "plain-text",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 2
+        },
+        {
+          "scenario": "one-tool",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 3
+        },
+        {
+          "scenario": "parallel-tools",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 5
+        },
+        {
+          "scenario": "stream-order",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 3
+        },
+        {
+          "scenario": "continuation",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 2
+        },
+        {
+          "scenario": "cancellation",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 3
+        },
+        {
+          "scenario": "malformed-tool-results",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 3
+        },
+        {
+          "scenario": "restart-behavior",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 3
+        },
+        {
+          "scenario": "model-and-tool-inventory",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 2
+        }
+      ],
+      "releaseEligibility": "baseline-only"
+    }
+  ],
+  "decision": {
+    "BASELINE_BRIDGE": "direct",
+    "SELECTED_BRIDGE": "none",
+    "STABLE_RELEASE": "blocked",
+    "ALPHA_RELEASE": "blocked",
+    "RELEASE_GATE": "BLOCKED"
+  },
+  "schema": {
+    "protocolVersion": "v2",
+    "cliVersion": "0.151.0",
+    "stableBundleSha256": "2442b15801bc019ad55987ad03e0f0ae60c51417825b9b6d708db640e6c2651c",
+    "experimentalBundleSha256": "a586cdc50f84c56c7654387e869b470a689796fa1c57678dcafb5921bb2d5255",
+    "stableDynamicTools": false,
+    "experimentalDynamicTools": true,
+    "releaseEligibility": "blocked"
+  }
+}

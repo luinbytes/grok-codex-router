@@ -26,6 +26,7 @@ import {
 const candidate: AppServerCandidate = "app-server-dynamic";
 const context: AppServerCandidateContext = {
   candidate,
+  expectedCwd: "/synthetic/workspace",
   expectedModel: "gpt-synthetic",
   activeThreadId: "thread-synthetic",
   activeTurnId: "turn-synthetic",
@@ -121,6 +122,7 @@ function validThreadResult(turns: readonly unknown[] = []): Record<string, unkno
     cwd: "/synthetic/workspace",
     model: "gpt-synthetic",
     modelProvider: "openai",
+    runtimeWorkspaceRoots: [],
     sandbox: { networkAccess: false, type: "readOnly" },
     thread: {
       cliVersion: "0.151.0",
@@ -132,8 +134,9 @@ function validThreadResult(turns: readonly unknown[] = []): Record<string, unkno
       preview: "",
       projectId: null,
       sessionId: "session-server-generated",
-      source: "appServer",
+      source: "vscode",
       status: { type: "idle" },
+      threadSource: "appServer",
       turns,
       updatedAt: 1
     }
@@ -247,6 +250,28 @@ test("validates each correlated response and exposes only semantic results", () 
   assert.deepEqual(thread, { kind: "lifecycle", lifecycle: "thread-started", threadId: "thread-server-generated" });
   assert.equal(JSON.stringify(thread).includes("/synthetic/workspace"), false);
 
+  assert.deepEqual(parseAppServerMessage(notification("thread/started", {
+    thread: validThreadResult().thread
+  }), { ...context, activeThreadId: "thread-server-generated" }), { kind: "accepted" });
+  assert.deepEqual(parseAppServerMessage({ emittedAtMs: 1, method: "remoteControl/status/changed", params: {
+    environmentId: null,
+    installationId: "installation-synthetic",
+    serverName: "server-synthetic",
+    status: "disabled"
+  } }, context), { kind: "accepted" });
+  assert.deepEqual(parseAppServerMessage({ emittedAtMs: -1, method: "remoteControl/status/changed", params: {
+    environmentId: null,
+    installationId: "installation-synthetic",
+    serverName: "server-synthetic",
+    status: "disabled"
+  } }, context), expectedRejection("protocol-failure"));
+  assert.deepEqual(parseAppServerMessage(notification("remoteControl/status/changed", {
+    environmentId: null,
+    installationId: "installation-synthetic",
+    serverName: "server-synthetic",
+    status: "connected"
+  }), context), expectedRejection("forbidden-built-in"));
+
   assert.deepEqual(response("turn/start", {
     turn: { id: "turn-server-generated", items: [], status: "inProgress" }
   }), { kind: "lifecycle", lifecycle: "turn-started", turnId: "turn-server-generated" });
@@ -279,7 +304,44 @@ test("validates each correlated response and exposes only semantic results", () 
   }), expectedRejection("protocol-failure"));
   assert.deepEqual(response("thread/start", {
     ...validThreadResult(),
+    modelProvider: "other",
+    thread: { ...(validThreadResult().thread as Record<string, unknown>), modelProvider: "other" }
+  }), expectedRejection("protocol-failure"));
+  assert.deepEqual(response("thread/start", {
+    ...validThreadResult(),
+    thread: { ...(validThreadResult().thread as Record<string, unknown>), ephemeral: false }
+  }), expectedRejection("protocol-failure"));
+  assert.deepEqual(response("thread/start", {
+    ...validThreadResult(),
+    thread: { ...(validThreadResult().thread as Record<string, unknown>), threadSource: "other" }
+  }), expectedRejection("protocol-failure"));
+  const appServerSource = validThreadResult().thread as Record<string, unknown>;
+  const { threadSource: ignoredThreadSource, ...threadWithoutAnalyticsSource } = appServerSource;
+  assert.equal(ignoredThreadSource, "appServer");
+  assert.deepEqual(response("thread/start", {
+    ...validThreadResult(),
+    thread: { ...threadWithoutAnalyticsSource, source: "appServer" }
+  }), { kind: "lifecycle", lifecycle: "thread-started", threadId: "thread-server-generated" });
+  assert.deepEqual(response("thread/start", {
+    ...validThreadResult(),
+    thread: threadWithoutAnalyticsSource
+  }), expectedRejection("protocol-failure"));
+  assert.deepEqual(response("thread/start", {
+    ...validThreadResult(),
     approvalsReviewer: "bogus"
+  }), expectedRejection("protocol-failure"));
+  assert.deepEqual(response("thread/start", {
+    ...validThreadResult(),
+    approvalsReviewer: "auto_review"
+  }), expectedRejection("protocol-failure"));
+  assert.deepEqual(response("thread/start", {
+    ...validThreadResult(),
+    runtimeWorkspaceRoots: ["/synthetic/external"]
+  }), expectedRejection("protocol-failure"));
+  assert.deepEqual(response("thread/start", {
+    ...validThreadResult(),
+    cwd: "/synthetic/other",
+    thread: { ...(validThreadResult().thread as Record<string, unknown>), cwd: "/synthetic/other" }
   }), expectedRejection("protocol-failure"));
   assert.deepEqual(response("thread/start", {
     ...validThreadResult(),
@@ -429,6 +491,7 @@ test("rejects uncorrelated methods, IDs, namespaces, contexts, and envelopes", (
     turnId: context.activeTurnId
   }), {
     candidate,
+    expectedCwd: "/synthetic/workspace",
     expectedModel: "gpt-synthetic",
     registeredToolNames: ["weather_lookup"]
   }), expectedRejection("protocol-failure"));

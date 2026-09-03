@@ -39,6 +39,7 @@ export type ResponseMethod =
 
 export interface AppServerCandidateContext {
   readonly candidate: AppServerCandidate;
+  readonly expectedCwd: string;
   readonly expectedModel: string;
   readonly activeThreadId?: string;
   readonly activeTurnId?: string;
@@ -113,7 +114,7 @@ const NON_TOOL_ITEM_TYPES = new Set([
 
 const REQUEST_KEYS = ["id", "method", "params"] as const;
 const RESPONSE_KEYS = ["id", "result"] as const;
-const NOTIFICATION_KEYS = ["method", "params"] as const;
+const NOTIFICATION_KEYS = ["emittedAtMs", "method", "params"] as const;
 
 export function requestId(value: string | number): RequestId {
   if (!isRequestId(value)) throw new Error("request ID is invalid");
@@ -122,6 +123,10 @@ export function requestId(value: string | number): RequestId {
 
 export function recordGrokToolResult(toolCallId: CallId): Extract<BridgeEvent, { readonly kind: "tool-result" }> {
   return { kind: "tool-result", callId: toolCallId, executor: "grok" };
+}
+
+export function cloneBoundedJsonObject(value: unknown): JsonObject | undefined {
+  return parseBoundedArguments(value);
 }
 
 export function createAppServerMessageParser(): AppServerMessageParser {
@@ -226,7 +231,8 @@ function parseRequest(raw: Record<string, unknown>, context: AppServerCandidateC
 }
 
 function parseNotification(raw: Record<string, unknown>, context: AppServerCandidateContext, identities: IdentityLedger): AppServerParseResult {
-  if (!hasOnlyKeys(raw, NOTIFICATION_KEYS) || typeof raw.method !== "string") {
+  if (!hasOnlyKeys(raw, NOTIFICATION_KEYS) || typeof raw.method !== "string"
+    || (hasOwn(raw, "emittedAtMs") && (!isFiniteInteger(raw.emittedAtMs) || raw.emittedAtMs < 0))) {
     return rejected("protocol-failure");
   }
   const params = parseBoundedJson(raw.params, MAX_RESPONSE_BYTES);
@@ -234,6 +240,10 @@ function parseNotification(raw: Record<string, unknown>, context: AppServerCandi
   switch (raw.method) {
     case "turn/started":
       return parseTurnStarted(params, context, identities.callScopes);
+    case "thread/started":
+      return parseThreadStarted(params, context);
+    case "remoteControl/status/changed":
+      return parseRemoteControlStatus(params);
     case "turn/completed":
       return parseTurnCompleted(params, context, identities.callScopes);
     case "item/agentMessage/delta":
@@ -372,19 +382,16 @@ function isReasoningEffortOption(value: JsonValue): boolean {
 function parseThreadStartResult(result: JsonObject, context: AppServerCandidateContext): AppServerParseResult {
   const thread = result.thread;
   if (!hasOwn(result, "approvalPolicy") || !hasOwn(result, "approvalsReviewer") || !hasOwn(result, "cwd")
-    || !hasOwn(result, "model") || !hasOwn(result, "modelProvider") || !hasOwn(result, "sandbox")
-    || result.approvalPolicy !== "never" || !isApprovalsReviewer(result.approvalsReviewer)
-    || !isBoundedNonEmptyField(result.cwd) || result.model !== context.expectedModel || !isBoundedText(result.modelProvider)
+    || !hasOwn(result, "model") || !hasOwn(result, "modelProvider") || !hasOwn(result, "runtimeWorkspaceRoots")
+    || !hasOwn(result, "sandbox") || result.approvalPolicy !== "never" || result.approvalsReviewer !== "user"
+    || result.cwd !== context.expectedCwd || result.model !== context.expectedModel || result.modelProvider !== "openai"
+    || !Array.isArray(result.runtimeWorkspaceRoots) || result.runtimeWorkspaceRoots.length !== 0
     || !isReadOnlySandbox(result.sandbox) || !isThreadSummary(thread)
-    || thread.cwd !== result.cwd || thread.modelProvider !== result.modelProvider) {
+    || thread.cwd !== result.cwd || thread.modelProvider !== result.modelProvider || thread.ephemeral !== true) {
     return rejected("protocol-failure");
   }
   const itemFault = auditThreadTurns(thread.turns, context);
   return itemFault === undefined ? { kind: "lifecycle", lifecycle: "thread-started", threadId: thread.id } : rejected(itemFault);
-}
-
-function isApprovalsReviewer(value: JsonValue | undefined): boolean {
-  return value === "user" || value === "auto_review" || value === "guardian_subagent";
 }
 
 function isReadOnlySandbox(value: JsonValue | undefined): boolean {
@@ -401,9 +408,16 @@ function isThreadSummary(value: JsonValue | undefined): value is JsonObject & { 
     || !isBoundedNonEmptyField(value.cwd) || typeof value.ephemeral !== "boolean" || !isBoundedText(value.id)
     || !isBoundedText(value.modelProvider) || !isBoundedField(value.preview)
     || (value.projectId !== null && !isBoundedField(value.projectId)) || !isBoundedText(value.sessionId)
-    || value.source !== "appServer" || !isThreadStatus(value.status)
+    || !isAppServerThreadOrigin(value) || !isThreadStatus(value.status)
     || !Array.isArray(value.turns) || !isFiniteInteger(value.updatedAt) || value.updatedAt < 0) return false;
   return true;
+}
+
+function isAppServerThreadOrigin(value: JsonObject): boolean {
+  if (value.source === "appServer") {
+    return !hasOwn(value, "threadSource") || value.threadSource === null || value.threadSource === "appServer";
+  }
+  return value.source === "vscode" && value.threadSource === "appServer";
 }
 
 function isThreadStatus(value: JsonValue | undefined): boolean {
@@ -427,6 +441,25 @@ function parseTurnStartResult(result: JsonObject, context: AppServerCandidateCon
   return dynamicItemsMatchPhase(turn.items, "started")
     ? { kind: "lifecycle", lifecycle: "turn-started", turnId: turn.id }
     : rejected("protocol-failure");
+}
+
+function parseThreadStarted(params: Record<string, unknown>, context: AppServerCandidateContext): AppServerParseResult {
+  if (context.activeThreadId === undefined || !hasOnlyKeys(params, ["thread"]) || !isPlainObject(params.thread)
+    || hasDangerousKey(params.thread) || hasAccessor(params.thread)) return rejected("protocol-failure");
+  const thread = parseBoundedJson(params.thread, MAX_RESPONSE_BYTES);
+  if (!isThreadSummary(thread) || thread.id !== context.activeThreadId) return rejected("protocol-failure");
+  const itemFault = auditThreadTurns(thread.turns, context);
+  return itemFault === undefined ? accepted() : rejected(itemFault);
+}
+
+function parseRemoteControlStatus(params: Record<string, unknown>): AppServerParseResult {
+  return hasOnlyKeys(params, ["environmentId", "installationId", "serverName", "status"])
+    && isBoundedText(params.installationId)
+    && isBoundedText(params.serverName)
+    && params.status === "disabled"
+    && (!hasOwn(params, "environmentId") || params.environmentId === null || isBoundedText(params.environmentId))
+    ? accepted()
+    : rejected("forbidden-built-in");
 }
 
 function auditThreadTurns(turns: readonly JsonValue[], context: AppServerCandidateContext): RejectionCode | undefined {
@@ -612,8 +645,9 @@ function isValidContext(context: AppServerCandidateContext): boolean {
   return isPlainObject(context)
     && !hasDangerousKey(context)
     && !hasAccessor(context)
-    && hasOnlyKeys(context, ["activeThreadId", "activeTurnId", "candidate", "expectedModel", "expectedResponse", "registeredToolNames"])
+    && hasOnlyKeys(context, ["activeThreadId", "activeTurnId", "candidate", "expectedCwd", "expectedModel", "expectedResponse", "registeredToolNames"])
     && (context.candidate === "app-server-dynamic" || context.candidate === "app-server-mcp")
+    && isBoundedNonEmptyField(context.expectedCwd)
     && isBoundedText(context.expectedModel)
     && (context.activeThreadId === undefined || isBoundedText(context.activeThreadId))
     && (context.activeTurnId === undefined || isBoundedText(context.activeTurnId))
