@@ -1,33 +1,32 @@
-import { spawn, type ChildProcessByStdio } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Readable } from "node:stream";
 import {
-  isolatedCodexEnvironment,
-  signalIsolatedProcessTree,
-  supportsIsolatedProcessTree
+  PINNED_CODEX_CLI_VERSION,
+  resolvePinnedCodexExecutable,
+  runOwnedCodexCommand,
+  supportsAuthenticatedAppServerPlatform
 } from "./codex-process.js";
 
 const MAX_SCHEMA_BUNDLE_BYTES = 2 * 1024 * 1024;
 const MAX_SCHEMA_DOCUMENT_BYTES = 256 * 1024;
-const MAX_COMMAND_OUTPUT_BYTES = 64 * 1024;
 const DEFAULT_SCHEMA_TIMEOUT_MS = 15_000;
 const MAX_SCHEMA_TIMEOUT_MS = 60_000;
 
 export interface AppServerSchemaReceipt {
   readonly protocolVersion: "v2";
   readonly cliVersion: string;
+  readonly codexCliSha256?: string;
   readonly stableBundleSha256: string;
   readonly experimentalBundleSha256: string;
   readonly stableDynamicTools: false;
   readonly experimentalDynamicTools: true;
+  readonly processContainment?: "same-process-group-only";
   readonly releaseEligibility: "blocked";
 }
 
 export interface AppServerSchemaProbeOptions {
-  readonly executable?: string;
   readonly timeoutMs?: number;
 }
 
@@ -64,88 +63,45 @@ export function inspectAppServerSchemaDirectories(
 }
 
 export async function probeInstalledAppServerSchemas(options: AppServerSchemaProbeOptions = {}): Promise<AppServerSchemaReceipt> {
-  if (!supportsIsolatedProcessTree(process.platform)) throw schemaError();
+  if (!supportsAuthenticatedAppServerPlatform(process.platform)) throw schemaError();
   validateOptions(options);
-  const executable = options.executable ?? "codex";
   const timeoutMs = options.timeoutMs ?? DEFAULT_SCHEMA_TIMEOUT_MS;
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gcr-app-server-schema-"));
+  const root = createSchemaRoot();
   const stable = path.join(root, "stable");
   const experimental = path.join(root, "experimental");
   const codexHome = path.join(root, "codex-home");
   try {
     fs.mkdirSync(codexHome, { mode: 0o700 });
-    const cliVersion = readVersion(await run(executable, ["--version"], root, codexHome, timeoutMs));
-    await run(executable, ["app-server", "generate-json-schema", "--out", stable], root, codexHome, timeoutMs);
-    await run(executable, ["app-server", "generate-json-schema", "--experimental", "--out", experimental], root, codexHome, timeoutMs);
-    return inspectAppServerSchemaDirectories(stable, experimental, cliVersion);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-}
-
-function run(executable: string, args: readonly string[], cwd: string, codexHome: string, timeoutMs: number): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    let child: ChildProcessByStdio<null, Readable, Readable>;
-    try {
-      child = spawn(executable, args, {
-        cwd,
-        detached: true,
-        env: isolatedCodexEnvironment(codexHome),
-        shell: false,
-        stdio: ["ignore", "pipe", "pipe"],
-        windowsHide: true
-      });
-    } catch {
-      reject(schemaError());
-      return;
-    }
-    const stdout: Buffer[] = [];
-    let stdoutBytes = 0;
-    let stderrBytes = 0;
-    let failed = false;
-    const fail = (): void => {
-      failed = true;
-      signalIsolatedProcessTree(child, "SIGKILL");
+    const codex = await resolvePinnedCodexExecutable(codexHome, timeoutMs);
+    await runOwnedCodexCommand({
+      executable: codex,
+      args: ["app-server", "generate-json-schema", "--out", stable],
+      cwd: root,
+      codexHome,
+      timeoutMs
+    });
+    await runOwnedCodexCommand({
+      executable: codex,
+      args: ["app-server", "generate-json-schema", "--experimental", "--out", experimental],
+      cwd: root,
+      codexHome,
+      timeoutMs
+    });
+    return {
+      ...inspectAppServerSchemaDirectories(stable, experimental, PINNED_CODEX_CLI_VERSION),
+      codexCliSha256: codex.sha256,
+      processContainment: "same-process-group-only"
     };
-    const timer = setTimeout(fail, timeoutMs);
-    child.stdout.on("data", (chunk: Buffer) => {
-      if (failed) return;
-      stdoutBytes += chunk.length;
-      if (stdoutBytes > MAX_COMMAND_OUTPUT_BYTES) {
-        fail();
-        return;
-      }
-      stdout.push(Buffer.from(chunk));
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      if (failed) return;
-      stderrBytes += chunk.length;
-      if (stderrBytes > MAX_COMMAND_OUTPUT_BYTES) fail();
-    });
-    child.once("error", fail);
-    child.once("exit", () => signalIsolatedProcessTree(child, "SIGKILL"));
-    child.once("close", (code, signal) => {
-      clearTimeout(timer);
-      if (failed || code !== 0 || signal !== null || stdoutBytes > MAX_COMMAND_OUTPUT_BYTES
-        || stderrBytes > MAX_COMMAND_OUTPUT_BYTES) {
-        reject(schemaError());
-        return;
-      }
-      resolve(Buffer.concat(stdout, stdoutBytes));
-    });
-  });
-}
-
-function readVersion(stdout: Buffer): string {
-  let value: string;
-  try {
-    value = stdout.toString("utf8").trim();
   } catch {
     throw schemaError();
+  } finally {
+    try {
+      fs.rmSync(root, { recursive: true, force: true });
+      if (fs.existsSync(root)) throw schemaError();
+    } catch {
+      throw schemaError();
+    }
   }
-  const match = /^codex-cli ([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)$/.exec(value);
-  if (match?.[1] === undefined || !isVersion(match[1])) throw schemaError();
-  return match[1];
 }
 
 function readBoundedFile(file: string, maxBytes: number): Buffer {
@@ -196,8 +152,7 @@ function validateProtocolBundle(bytes: Buffer): void {
 
 function validateOptions(options: AppServerSchemaProbeOptions): void {
   try {
-    if (!isPlainRecord(options) || !hasOnlyKeys(options, ["executable", "timeoutMs"])
-      || (options.executable !== undefined && !isCommand(options.executable))
+    if (!isPlainRecord(options) || !hasOnlyKeys(options, ["timeoutMs"])
       || (options.timeoutMs !== undefined && (!isPositiveInteger(options.timeoutMs) || options.timeoutMs > MAX_SCHEMA_TIMEOUT_MS))) {
       throw schemaError();
     }
@@ -206,9 +161,12 @@ function validateOptions(options: AppServerSchemaProbeOptions): void {
   }
 }
 
-function isCommand(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= 16 * 1024
-    && Buffer.byteLength(value, "utf8") <= 16 * 1024 && !value.includes("\0");
+function createSchemaRoot(): string {
+  try {
+    return fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "gcr-app-server-schema-"));
+  } catch {
+    throw schemaError();
+  }
 }
 
 function isVersion(value: unknown): value is string {

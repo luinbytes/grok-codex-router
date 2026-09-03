@@ -9,6 +9,7 @@ import {
 const MAX_ID_LENGTH = 1024;
 const MAX_FIELD_BYTES = 64 * 1024;
 const MAX_TOOL_NAMES = 256;
+const MAX_ISOLATION_ITEMS = 256;
 const MAX_TRACKED_IDENTITIES = 4096;
 export const MAX_ARGUMENT_BYTES = 64 * 1024;
 export const MAX_JSON_DEPTH = 16;
@@ -31,19 +32,24 @@ export interface ExpectedResponse {
 
 export type ResponseMethod =
   | "initialize"
+  | "config/read"
   | "account/read"
   | "model/list"
+  | "mcpServerStatus/list"
+  | "hooks/list"
   | "thread/start"
   | "turn/start"
   | "turn/interrupt";
 
 export interface AppServerCandidateContext {
   readonly candidate: AppServerCandidate;
+  readonly expectedCliVersion?: string;
   readonly expectedCwd: string;
   readonly expectedModel: string;
   readonly activeThreadId?: string;
   readonly activeTurnId?: string;
   readonly registeredToolNames: readonly string[];
+  readonly expectedDisabledMcpServerNames?: readonly string[];
   readonly expectedResponse?: ExpectedResponse;
 }
 
@@ -58,13 +64,19 @@ export type RequestId = (string | number) & { readonly [REQUEST_ID]: true };
 export type AppServerParseResult =
   | { readonly kind: "accepted" }
   | { readonly kind: "events"; readonly events: readonly BridgeEvent[] }
+  | { readonly kind: "lifecycle"; readonly lifecycle: "credential-store-file" }
   | { readonly kind: "lifecycle"; readonly lifecycle: "model-available" }
+  | { readonly kind: "lifecycle"; readonly lifecycle: "mcp-inventory"; readonly serverNames: readonly string[] }
+  | { readonly kind: "lifecycle"; readonly lifecycle: "mcp-disabled" }
+  | { readonly kind: "lifecycle"; readonly lifecycle: "hooks-inventory"; readonly hookKeys: readonly string[] }
   | { readonly kind: "lifecycle"; readonly lifecycle: "thread-started"; readonly threadId: string }
   | { readonly kind: "lifecycle"; readonly lifecycle: "turn-started"; readonly turnId: string }
   | {
       readonly kind: "tool-handoff";
       readonly requestId: RequestId;
       readonly callId: CallId;
+      readonly threadId: string;
+      readonly turnId: string;
       readonly tool: string;
       readonly arguments: JsonObject;
       readonly executor: "grok";
@@ -84,8 +96,11 @@ export type RejectionCode =
 
 const RESPONSE_METHODS = new Set<ResponseMethod>([
   "initialize",
+  "config/read",
   "account/read",
   "model/list",
+  "mcpServerStatus/list",
+  "hooks/list",
   "thread/start",
   "turn/start",
   "turn/interrupt"
@@ -142,10 +157,14 @@ export function createAppServerMessageParser(): AppServerMessageParser {
         if (context.activeThreadId === undefined || context.activeTurnId === undefined) {
           return rejected("protocol-failure");
         }
+        const storedArguments = parseBoundedArguments(result.arguments);
+        if (storedArguments === undefined) return rejected("protocol-failure");
         identities.requestIds.add(result.requestId);
         identities.callScopes.set(result.callId, {
           threadId: context.activeThreadId,
-          turnId: context.activeTurnId
+          turnId: context.activeTurnId,
+          tool: result.tool,
+          arguments: storedArguments
         });
       }
       return result;
@@ -162,6 +181,8 @@ interface IdentityLedger {
 interface CallScope {
   readonly threadId: string;
   readonly turnId: string;
+  readonly tool: string;
+  readonly arguments: JsonObject;
 }
 
 function parseAppServerMessage(raw: unknown, context: AppServerCandidateContext, identities: IdentityLedger): AppServerParseResult {
@@ -223,6 +244,8 @@ function parseRequest(raw: Record<string, unknown>, context: AppServerCandidateC
     kind: "tool-handoff",
     requestId: raw.id,
     callId: parsedCallId,
+    threadId: params.threadId,
+    turnId: params.turnId,
     tool: params.tool,
     arguments: argumentsValue,
     executor: "grok",
@@ -275,12 +298,31 @@ function parseResponse(raw: Record<string, unknown>, context: AppServerCandidate
   switch (context.expectedResponse.method) {
     case "initialize":
       return isInitializeResult(result) ? accepted() : rejected("protocol-failure");
+    case "config/read":
+      return isFileCredentialStore(result)
+        ? { kind: "lifecycle", lifecycle: "credential-store-file" }
+        : rejected("protocol-failure");
     case "account/read":
       return parseAccountResult(result);
     case "model/list":
       return isModelListResult(result, context.expectedModel)
         ? { kind: "lifecycle", lifecycle: "model-available" }
         : rejected("protocol-failure");
+    case "mcpServerStatus/list":
+      if (context.expectedDisabledMcpServerNames !== undefined) {
+        return isDisabledMcpServerStatus(result, context.expectedDisabledMcpServerNames)
+          ? { kind: "lifecycle", lifecycle: "mcp-disabled" }
+          : rejected("unexpected-mcp");
+      }
+      const serverNames = parseMcpServerNames(result);
+      return serverNames === undefined
+        ? rejected("unexpected-mcp")
+        : { kind: "lifecycle", lifecycle: "mcp-inventory", serverNames };
+    case "hooks/list":
+      const hookKeys = parseHookKeys(result, context.expectedCwd);
+      return hookKeys === undefined
+        ? rejected("forbidden-built-in")
+        : { kind: "lifecycle", lifecycle: "hooks-inventory", hookKeys };
     case "thread/start":
       return parseThreadStartResult(result, context);
     case "turn/start":
@@ -292,6 +334,92 @@ function parseResponse(raw: Record<string, unknown>, context: AppServerCandidate
       return exhaustive;
     }
   }
+}
+
+function isFileCredentialStore(result: JsonObject): boolean {
+  if (!hasOnlyKeys(result, ["config", "layers", "origins"])
+    || !isJsonObject(result.config)
+    || result.config.cli_auth_credentials_store !== "file"
+    || !isJsonObject(result.origins)) return false;
+  return !hasOwn(result, "layers") || result.layers === null || Array.isArray(result.layers);
+}
+
+function parseMcpServerNames(result: JsonObject): readonly string[] | undefined {
+  if (!hasOnlyKeys(result, ["data", "nextCursor"])
+    || !Array.isArray(result.data)
+    || result.data.length > MAX_ISOLATION_ITEMS
+    || (hasOwn(result, "nextCursor") && result.nextCursor !== null)) return undefined;
+  const names: string[] = [];
+  for (const entry of result.data) {
+    if (!isSafeMcpPreflightStatus(entry)) return undefined;
+    names.push(entry.name);
+  }
+  return new Set(names).size === names.length ? names : undefined;
+}
+
+function isSafeMcpPreflightStatus(value: JsonValue): value is JsonObject & { readonly name: string } {
+  return isMcpServerStatus(value)
+    && (!hasOwn(value, "runtimeStatus") || value.runtimeStatus === null || value.runtimeStatus === "notStarted" || value.runtimeStatus === "disabled")
+    && (!hasOwn(value, "serverInfo") || value.serverInfo === null)
+    && isEmptyJsonObject(value.tools)
+    && Array.isArray(value.resources) && value.resources.length === 0
+    && Array.isArray(value.resourceTemplates) && value.resourceTemplates.length === 0;
+}
+
+function isDisabledMcpServerStatus(result: JsonObject, expectedNames: readonly string[]): boolean {
+  const names = parseMcpServerNames(result);
+  if (names === undefined || names.length !== expectedNames.length || !sameStringSet(names, expectedNames)) return false;
+  return (result.data as readonly JsonValue[]).every((entry) => isJsonObject(entry)
+    && entry.runtimeStatus === "disabled"
+    && isEmptyJsonObject(entry.tools)
+    && Array.isArray(entry.resources) && entry.resources.length === 0
+    && Array.isArray(entry.resourceTemplates) && entry.resourceTemplates.length === 0);
+}
+
+function isMcpServerStatus(value: JsonValue): value is JsonObject & { readonly name: string } {
+  return isJsonObject(value)
+    && hasOnlyKeys(value, ["authStatus", "name", "pluginId", "resourceTemplates", "resources", "runtimeStatus", "serverInfo", "tools"])
+    && isBoundedText(value.name)
+    && (value.authStatus === "unknown" || value.authStatus === "unsupported" || value.authStatus === "notLoggedIn"
+      || value.authStatus === "bearerToken" || value.authStatus === "oAuth")
+    && (!hasOwn(value, "pluginId") || value.pluginId === null || isBoundedText(value.pluginId))
+    && Array.isArray(value.resourceTemplates)
+    && Array.isArray(value.resources)
+    && (!hasOwn(value, "runtimeStatus") || value.runtimeStatus === null || isMcpRuntimeStatus(value.runtimeStatus))
+    && (!hasOwn(value, "serverInfo") || value.serverInfo === null || isJsonObject(value.serverInfo))
+    && isJsonObject(value.tools);
+}
+
+function isMcpRuntimeStatus(value: JsonValue | undefined): boolean {
+  return value === "notStarted" || value === "starting" || value === "connected"
+    || value === "authenticationRequired" || value === "failed" || value === "cancelled" || value === "disabled";
+}
+
+function parseHookKeys(result: JsonObject, expectedCwd: string): readonly string[] | undefined {
+  if (!hasOnlyKeys(result, ["data"]) || !Array.isArray(result.data) || result.data.length !== 1) return undefined;
+  const entry = result.data[0];
+  if (!isJsonObject(entry)
+    || !hasOnlyKeys(entry, ["cwd", "errors", "hooks", "warnings"])
+    || entry.cwd !== expectedCwd
+    || !Array.isArray(entry.errors) || entry.errors.length !== 0
+    || !Array.isArray(entry.hooks) || entry.hooks.length > MAX_ISOLATION_ITEMS
+    || !Array.isArray(entry.warnings) || entry.warnings.length !== 0) return undefined;
+  const keys: string[] = [];
+  for (const hook of entry.hooks) {
+    if (!isJsonObject(hook) || !isBoundedText(hook.key) || typeof hook.enabled !== "boolean") return undefined;
+    keys.push(hook.key);
+  }
+  return new Set(keys).size === keys.length ? keys : undefined;
+}
+
+function isEmptyJsonObject(value: JsonValue | undefined): boolean {
+  return isJsonObject(value) && Object.keys(value).length === 0;
+}
+
+function sameStringSet(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false;
+  const values = new Set(left);
+  return right.every((value) => values.has(value));
 }
 
 const PLAN_TYPES = new Set([
@@ -331,7 +459,7 @@ function parseAccountResult(result: JsonObject): AppServerParseResult {
       ? events([{ kind: "authentication", owner: "codex", status: "signed-out" }])
       : rejected("protocol-failure");
   }
-  if (result.requiresOpenaiAuth || !isChatgptAccount(account)) return rejected("protocol-failure");
+  if (!result.requiresOpenaiAuth || !isChatgptAccount(account)) return rejected("protocol-failure");
   return events([{ kind: "authentication", owner: "codex", status: "signed-in" }]);
 }
 
@@ -387,6 +515,7 @@ function parseThreadStartResult(result: JsonObject, context: AppServerCandidateC
     || result.cwd !== context.expectedCwd || result.model !== context.expectedModel || result.modelProvider !== "openai"
     || !Array.isArray(result.runtimeWorkspaceRoots) || result.runtimeWorkspaceRoots.length !== 0
     || !isReadOnlySandbox(result.sandbox) || !isThreadSummary(thread)
+    || (context.expectedCliVersion !== undefined && thread.cliVersion !== context.expectedCliVersion)
     || thread.cwd !== result.cwd || thread.modelProvider !== result.modelProvider || thread.ephemeral !== true) {
     return rejected("protocol-failure");
   }
@@ -490,6 +619,10 @@ function auditItem(value: JsonValue, context: AppServerCandidateContext, issuedC
     if (issuedCallScopes !== undefined) {
       const scope = issuedCallScopes.get(callId(value.id));
       if (scope === undefined || scope.threadId !== context.activeThreadId || scope.turnId !== context.activeTurnId) {
+        return "protocol-failure";
+      }
+      const argumentsValue = parseBoundedArguments(value.arguments);
+      if (scope.tool !== value.tool || argumentsValue === undefined || !sameJson(scope.arguments, argumentsValue)) {
         return "protocol-failure";
       }
     }
@@ -645,8 +778,9 @@ function isValidContext(context: AppServerCandidateContext): boolean {
   return isPlainObject(context)
     && !hasDangerousKey(context)
     && !hasAccessor(context)
-    && hasOnlyKeys(context, ["activeThreadId", "activeTurnId", "candidate", "expectedCwd", "expectedModel", "expectedResponse", "registeredToolNames"])
+    && hasOnlyKeys(context, ["activeThreadId", "activeTurnId", "candidate", "expectedCliVersion", "expectedCwd", "expectedDisabledMcpServerNames", "expectedModel", "expectedResponse", "registeredToolNames"])
     && (context.candidate === "app-server-dynamic" || context.candidate === "app-server-mcp")
+    && (context.expectedCliVersion === undefined || isBoundedText(context.expectedCliVersion))
     && isBoundedNonEmptyField(context.expectedCwd)
     && isBoundedText(context.expectedModel)
     && (context.activeThreadId === undefined || isBoundedText(context.activeThreadId))
@@ -655,6 +789,11 @@ function isValidContext(context: AppServerCandidateContext): boolean {
     && context.registeredToolNames.length <= MAX_TOOL_NAMES
     && context.registeredToolNames.every(isBoundedText)
     && new Set(context.registeredToolNames).size === context.registeredToolNames.length
+    && (context.expectedDisabledMcpServerNames === undefined
+      || (Array.isArray(context.expectedDisabledMcpServerNames)
+        && context.expectedDisabledMcpServerNames.length <= MAX_ISOLATION_ITEMS
+        && context.expectedDisabledMcpServerNames.every(isBoundedText)
+        && new Set(context.expectedDisabledMcpServerNames).size === context.expectedDisabledMcpServerNames.length))
     && (context.expectedResponse === undefined || isExpectedResponse(context.expectedResponse));
 }
 
@@ -697,6 +836,20 @@ function parseBoundedArguments(value: unknown): JsonObject | undefined {
   const parsed = parseBoundedJson(value, MAX_ARGUMENT_BYTES);
   if (parsed === undefined || !isJsonObject(parsed)) return undefined;
   return parsed;
+}
+
+function sameJson(left: JsonValue, right: JsonValue): boolean {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => sameJson(value, right[index] as JsonValue));
+  }
+  if (!isJsonObject(left) || !isJsonObject(right)) return false;
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key, index) => key === rightKeys[index] && sameJson(left[key] as JsonValue, right[key] as JsonValue));
 }
 
 function parseBoundedJson(value: unknown, maxBytes: number): JsonValue | undefined {

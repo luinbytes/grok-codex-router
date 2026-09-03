@@ -27,6 +27,7 @@ const candidate: AppServerCandidate = "app-server-dynamic";
 const context: AppServerCandidateContext = {
   candidate,
   expectedCwd: "/synthetic/workspace",
+  expectedCliVersion: "0.151.0",
   expectedModel: "gpt-synthetic",
   activeThreadId: "thread-synthetic",
   activeTurnId: "turn-synthetic",
@@ -226,9 +227,16 @@ test("validates each correlated response and exposes only semantic results", () 
     userAgent: "synthetic-agent"
   }), { kind: "accepted" });
 
+  const credentialStore = response("config/read", {
+    config: { cli_auth_credentials_store: "file", privatePath: "/private/value" },
+    origins: {}
+  });
+  assert.deepEqual(credentialStore, { kind: "lifecycle", lifecycle: "credential-store-file" });
+  assert.equal(JSON.stringify(credentialStore).includes("/private/value"), false);
+
   const signedIn = response("account/read", {
     account: { email: "private@example.invalid", planType: "plus", type: "chatgpt" },
-    requiresOpenaiAuth: false
+    requiresOpenaiAuth: true
   });
   assert.deepEqual(signedIn, { kind: "events", events: [{ kind: "authentication", owner: "codex", status: "signed-in" }] });
   assert.equal(JSON.stringify(signedIn).includes("private@example.invalid"), false);
@@ -300,6 +308,10 @@ test("validates each correlated response and exposes only semantic results", () 
   assert.deepEqual(response("thread/start", { thread: { id: "wrong-shape", turns: [] } }), expectedRejection("protocol-failure"));
   assert.deepEqual(response("thread/start", {
     ...validThreadResult(),
+    thread: { ...(validThreadResult().thread as Record<string, unknown>), cliVersion: "0.152.0" }
+  }), expectedRejection("protocol-failure"));
+  assert.deepEqual(response("thread/start", {
+    ...validThreadResult(),
     approvalPolicy: "on-request"
   }), expectedRejection("protocol-failure"));
   assert.deepEqual(response("thread/start", {
@@ -365,10 +377,69 @@ test("validates each correlated response and exposes only semantic results", () 
   assert.deepEqual(response("turn/interrupt", { extra: true }), expectedRejection("protocol-failure"));
 });
 
+test("requires the effective file credential store", () => {
+  assert.deepEqual(response("config/read", {
+    config: { cli_auth_credentials_store: "keyring" },
+    origins: {}
+  }), expectedRejection("protocol-failure"));
+  assert.deepEqual(response("config/read", {
+    config: {},
+    origins: {}
+  }), expectedRejection("protocol-failure"));
+  assert.deepEqual(response("config/read", {
+    config: { cli_auth_credentials_store: "file" },
+    origins: {},
+    unexpected: "private"
+  }), expectedRejection("protocol-failure"));
+});
+
+test("records global isolation inventory and requires every thread-scoped MCP server disabled", () => {
+  const configured = [
+    { authStatus: "unknown", name: "alpha", resourceTemplates: [], resources: [], runtimeStatus: null, serverInfo: null, tools: {} },
+    { authStatus: "notLoggedIn", name: "beta", resourceTemplates: [], resources: [], runtimeStatus: "notStarted", serverInfo: null, tools: {} }
+  ];
+  assert.deepEqual(response("mcpServerStatus/list", { data: configured, nextCursor: null }), {
+    kind: "lifecycle",
+    lifecycle: "mcp-inventory",
+    serverNames: ["alpha", "beta"]
+  });
+  const disabledContext = {
+    ...responseContext("mcpServerStatus/list"),
+    expectedDisabledMcpServerNames: ["alpha", "beta"]
+  };
+  const disabled = configured.map((entry) => ({
+    ...entry,
+    resourceTemplates: [],
+    resources: [],
+    runtimeStatus: "disabled",
+    tools: {}
+  }));
+  assert.deepEqual(createAppServerMessageParser().parse({ id: "response-synthetic", result: { data: disabled, nextCursor: null } }, disabledContext), {
+    kind: "lifecycle",
+    lifecycle: "mcp-disabled"
+  });
+  assert.deepEqual(createAppServerMessageParser().parse({ id: "response-synthetic", result: { data: [disabled[0]], nextCursor: null } }, disabledContext), expectedRejection("unexpected-mcp"));
+  assert.deepEqual(response("mcpServerStatus/list", {
+    data: [{ ...configured[0], runtimeStatus: "connected" }],
+    nextCursor: null
+  }), expectedRejection("unexpected-mcp"));
+  assert.deepEqual(response("mcpServerStatus/list", {
+    data: [{ ...configured[0], tools: { lookup: {} } }],
+    nextCursor: null
+  }), expectedRejection("unexpected-mcp"));
+  assert.deepEqual(response("hooks/list", {
+    data: [{ cwd: context.expectedCwd, errors: [], hooks: [{ enabled: true, key: "project-hook" }], warnings: [] }]
+  }), { kind: "lifecycle", lifecycle: "hooks-inventory", hookKeys: ["project-hook"] });
+});
+
 test("requires a Codex-owned ChatGPT account for signed-in status", () => {
   assert.deepEqual(response("account/read", {
     account: { email: null, planType: "plus", type: "chatgpt" },
     requiresOpenaiAuth: true
+  }), { kind: "events", events: [{ kind: "authentication", owner: "codex", status: "signed-in" }] });
+  assert.deepEqual(response("account/read", {
+    account: { email: null, planType: "plus", type: "chatgpt" },
+    requiresOpenaiAuth: false
   }), expectedRejection("protocol-failure"));
   assert.deepEqual(response("account/read", {
     account: null,

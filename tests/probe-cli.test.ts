@@ -20,10 +20,11 @@ interface Invocation {
   readonly stderr: string;
 }
 
-function invoke(cwd: string, args: readonly string[]): Invocation {
+function invoke(cwd: string, args: readonly string[], pathValue?: string): Invocation {
   const result = spawnSync(process.execPath, [CLI, ...args], {
     cwd,
-    encoding: "utf8"
+    encoding: "utf8",
+    ...(pathValue === undefined ? {} : { env: { ...process.env, PATH: pathValue } })
   });
   return {
     status: result.status,
@@ -54,9 +55,13 @@ test("fixture CLI writes a safe deterministic blocked report", () => {
     const firstBytes = fs.readFileSync(reportPath);
     const report: unknown = JSON.parse(firstBytes.toString("utf8"));
     const reportRecord = requireRecord(report);
-    assert.deepEqual(Object.keys(reportRecord), ["schemaVersion", "mode", "reports", "decision"]);
+    assert.deepEqual(Object.keys(reportRecord), ["schemaVersion", "mode", "provenance", "reports", "decision"]);
     assert.equal(reportRecord.schemaVersion, 1);
     assert.equal(reportRecord.mode, "fixtures-only");
+    const provenance = requireRecord(reportRecord.provenance);
+    assert.equal(provenance.format, "gcr-probe-build/v1");
+    assert.equal(provenance.routerVersion, "0.1.0");
+    assert.match(String(provenance.probeBuildSha256), /^[a-f0-9]{64}$/);
     assert.deepEqual(requireRecord(reportRecord.decision), {
       BASELINE_BRIDGE: "direct",
       SELECTED_BRIDGE: "none",
@@ -119,8 +124,13 @@ test("fixture CLI rejects unknown, duplicate, and missing option values", () => 
       ["--schemas-only", "--model", "gpt-synthetic"],
       ["--isolated-lifecycle"],
       ["--fixtures-only", "--codex", "codex"],
-      ["--schemas-only", "--codex", "first", "--codex", "second"],
+      ["--schemas-only", "--codex", "first"],
       ["--isolated-lifecycle", "--model"],
+      ["--authenticated-tool-roundtrip"],
+      ["--authenticated-tool-roundtrip", "--model", "gpt-synthetic"],
+      ["--authenticated-tool-roundtrip", "--model", "gpt-synthetic", "--codex-home", "/tmp/codex-home", "--codex", "codex"],
+      ["--fixtures-only", "--codex-home", "/tmp/codex-home"],
+      ["--authenticated-tool-roundtrip", "--model", "gpt-synthetic", "--model", "gpt-other"],
       ["--unexpected-positional"]
     ];
     for (const args of cases) {
@@ -140,7 +150,66 @@ test("fixture CLI rejects unknown, duplicate, and missing option values", () => 
   });
 });
 
-test("fixture CLI removes its temporary file when the atomic rename fails", () => {
+test("authenticated CLI accepts model, output, and dedicated-home options but writes no failure artifact", () => {
+  withTemporaryDirectory((directory) => {
+    fs.writeFileSync(path.join(directory, ".grok-codex-router-home"), "GCR_CODEX_HOME_V1\n", { mode: 0o600 });
+    const result = invoke(directory, [
+      "--authenticated-tool-roundtrip",
+      "--model", "gpt-synthetic",
+      "--codex-home", directory,
+      "--output", "auth-report.json"
+    ], "");
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "ERROR: authenticated app server probe failed\n");
+    assert.equal(fs.existsSync(path.join(directory, "auth-report.json")), false);
+    assert.deepEqual(fs.readdirSync(directory), [".grok-codex-router-home"]);
+  });
+});
+
+test("authenticated CLI preserves recognized evidence and refuses a reused output path", () => {
+  withTemporaryDirectory((directory) => {
+    const reportPath = path.join(directory, "auth-report.json");
+    const original = JSON.stringify({
+      schemaVersion: 1,
+      mode: "authenticated-tool-roundtrip",
+      reports: [],
+      decision: {},
+      authenticated: {}
+    });
+    fs.writeFileSync(reportPath, original);
+    const result = invoke(directory, [
+      "--authenticated-tool-roundtrip",
+      "--model", "gpt-synthetic",
+      "--codex-home", directory,
+      "--output", "auth-report.json"
+    ]);
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "ERROR: unable to prepare probe report\n");
+    assert.equal(fs.readFileSync(reportPath, "utf8"), original);
+  });
+});
+
+test("authenticated CLI preserves an unrecognized output target and refuses before spawn", () => {
+  withTemporaryDirectory((directory) => {
+    const reportPath = path.join(directory, "auth-report.json");
+    const original = "operator-owned-content\n";
+    fs.writeFileSync(reportPath, original);
+    const result = invoke(directory, [
+      "--authenticated-tool-roundtrip",
+      "--model", "gpt-synthetic",
+      "--codex-home", directory,
+      "--output", "auth-report.json"
+    ]);
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "ERROR: unable to prepare probe report\n");
+    assert.equal(fs.readFileSync(reportPath, "utf8"), original);
+  });
+});
+
+test("fixture CLI refuses an output directory without creating a temporary file", () => {
   withTemporaryDirectory((directory) => {
     const outputDirectory = path.join(directory, "output-directory");
     fs.mkdirSync(outputDirectory);
@@ -148,7 +217,7 @@ test("fixture CLI removes its temporary file when the atomic rename fails", () =
 
     assert.equal(result.status, 1);
     assert.equal(result.stdout, "");
-    assert.equal(result.stderr, "ERROR: unable to write probe report\n");
+    assert.equal(result.stderr, "ERROR: unable to prepare probe report\n");
     assert.deepEqual(fs.readdirSync(directory), ["output-directory"]);
     assert.deepEqual(fs.readdirSync(outputDirectory), []);
   });

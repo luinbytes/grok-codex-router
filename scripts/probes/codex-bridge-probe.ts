@@ -1,16 +1,22 @@
 #!/usr/bin/env node
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { probeInstalledAppServerSchemas, type AppServerSchemaReceipt } from "./app-server-schema.js";
+import { probeAuthenticatedAppServer, type AuthenticatedProbeReceipt } from "./app-server-authenticated.js";
 import { probeIsolatedAppServerLifecycle, type AppServerLifecycleReceipt } from "./app-server-stdio.js";
 import { decideRelease, projectSafeReport, type BridgeDecision, type SafeCandidateReport } from "./bridge-contract.js";
 import { directFixture } from "./direct-candidate.js";
+import { PINNED_CODEX_CLI_VERSION } from "./codex-process.js";
 
 const ARTIFACT_SCHEMA_VERSION = 1;
+const MAX_PROBE_BUILD_FILES = 64;
+const MAX_PROBE_BUILD_FILE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_OUTPUTS = {
   "fixtures-only": path.join("artifacts", "gcr-1", "fixture-report.json"),
   "schemas-only": path.join("artifacts", "gcr-1", "schema-report.json"),
-  "isolated-lifecycle": path.join("artifacts", "gcr-1", "isolated-lifecycle-report.json")
+  "isolated-lifecycle": path.join("artifacts", "gcr-1", "isolated-lifecycle-report.json"),
+  "authenticated-tool-roundtrip": path.join("artifacts", "gcr-1", "authenticated-tool-report.json")
 } as const;
 
 type ProbeMode = keyof typeof DEFAULT_OUTPUTS;
@@ -19,12 +25,19 @@ interface CliOptions {
   readonly mode: ProbeMode;
   readonly output: string | undefined;
   readonly model: string | undefined;
-  readonly codexExecutable: string | undefined;
+  readonly codexHome: string | undefined;
+}
+
+interface ArtifactProvenance {
+  readonly format: "gcr-probe-build/v1";
+  readonly routerVersion: string;
+  readonly probeBuildSha256: string;
 }
 
 interface BaseArtifact {
   readonly schemaVersion: typeof ARTIFACT_SCHEMA_VERSION;
   readonly mode: ProbeMode;
+  readonly provenance: ArtifactProvenance;
   readonly reports: readonly SafeCandidateReport[];
   readonly decision: BridgeDecision;
 }
@@ -43,13 +56,18 @@ interface LifecycleArtifact extends BaseArtifact {
   readonly lifecycle: AppServerLifecycleReceipt;
 }
 
-type ProbeArtifact = FixtureArtifact | SchemaArtifact | LifecycleArtifact;
+interface AuthenticatedArtifact extends BaseArtifact {
+  readonly mode: "authenticated-tool-roundtrip";
+  readonly authenticated: AuthenticatedProbeReceipt;
+}
+
+type ProbeArtifact = FixtureArtifact | SchemaArtifact | LifecycleArtifact | AuthenticatedArtifact;
 
 function parseArgs(args: readonly string[]): CliOptions {
   let mode: ProbeMode | undefined;
   let output: string | undefined;
   let model: string | undefined;
-  let codexExecutable: string | undefined;
+  let codexHome: string | undefined;
   let index = 0;
   while (index < args.length) {
     const argument = args[index];
@@ -57,15 +75,16 @@ function parseArgs(args: readonly string[]): CliOptions {
       index += 1;
       continue;
     }
-    if (argument === "--fixtures-only" || argument === "--schemas-only" || argument === "--isolated-lifecycle") {
+    if (argument === "--fixtures-only" || argument === "--schemas-only" || argument === "--isolated-lifecycle" || argument === "--authenticated-tool-roundtrip") {
       if (mode !== undefined) throw new Error("exactly one probe mode is required");
       if (argument === "--fixtures-only") mode = "fixtures-only";
       else if (argument === "--schemas-only") mode = "schemas-only";
-      else mode = "isolated-lifecycle";
+      else if (argument === "--isolated-lifecycle") mode = "isolated-lifecycle";
+      else mode = "authenticated-tool-roundtrip";
       index += 1;
       continue;
     }
-    if (argument === "--output" || argument === "--model" || argument === "--codex") {
+    if (argument === "--output" || argument === "--model" || argument === "--codex-home") {
       const value = args[index + 1];
       if (value === undefined || value === "--" || value.startsWith("--") || value.length === 0) {
         throw new Error("missing option value");
@@ -77,8 +96,8 @@ function parseArgs(args: readonly string[]): CliOptions {
         if (model !== undefined) throw new Error("duplicate option");
         model = value;
       } else {
-        if (codexExecutable !== undefined) throw new Error("duplicate option");
-        codexExecutable = value;
+        if (codexHome !== undefined) throw new Error("duplicate option");
+        codexHome = value;
       }
       index += 2;
       continue;
@@ -86,10 +105,11 @@ function parseArgs(args: readonly string[]): CliOptions {
     throw new Error("unknown option");
   }
   if (mode === undefined) throw new Error("exactly one probe mode is required");
-  if (mode === "isolated-lifecycle" && model === undefined) throw new Error("--model is required for isolated lifecycle mode");
-  if (mode !== "isolated-lifecycle" && model !== undefined) throw new Error("--model is only valid for isolated lifecycle mode");
-  if (mode === "fixtures-only" && codexExecutable !== undefined) throw new Error("--codex is only valid for live local probes");
-  return { mode, output, model, codexExecutable };
+  if ((mode === "isolated-lifecycle" || mode === "authenticated-tool-roundtrip") && model === undefined) throw new Error("--model is required for live local probes");
+  if (mode !== "isolated-lifecycle" && mode !== "authenticated-tool-roundtrip" && model !== undefined) throw new Error("--model is only valid for live local probes");
+  if (mode === "authenticated-tool-roundtrip" && codexHome === undefined) throw new Error("--codex-home is required for authenticated mode");
+  if (mode !== "authenticated-tool-roundtrip" && codexHome !== undefined) throw new Error("--codex-home is only valid for authenticated mode");
+  return { mode, output, model, codexHome };
 }
 
 function baseArtifact(mode: ProbeMode): BaseArtifact {
@@ -97,6 +117,11 @@ function baseArtifact(mode: ProbeMode): BaseArtifact {
   return {
     schemaVersion: ARTIFACT_SCHEMA_VERSION,
     mode,
+    provenance: {
+      format: "gcr-probe-build/v1",
+      routerVersion: readPackageVersion(),
+      probeBuildSha256: readProbeBuildSha256()
+    },
     reports: [projectSafeReport(report)],
     decision: decideRelease([report])
   };
@@ -106,18 +131,15 @@ function fixtureArtifact(): FixtureArtifact {
   return { ...baseArtifact("fixtures-only"), mode: "fixtures-only" };
 }
 
-async function schemaArtifact(executable: string | undefined): Promise<SchemaArtifact> {
-  const schema = await probeInstalledAppServerSchemas(executable === undefined ? {} : { executable });
+async function schemaArtifact(): Promise<SchemaArtifact> {
+  const schema = await probeInstalledAppServerSchemas();
   return { ...baseArtifact("schemas-only"), mode: "schemas-only", schema };
 }
 
-async function lifecycleArtifact(model: string, executable: string | undefined): Promise<LifecycleArtifact> {
-  const command = executable === undefined
-    ? { executable: "codex", args: ["app-server", "--stdio"] }
-    : { executable, args: ["app-server", "--stdio"] };
+async function lifecycleArtifact(model: string): Promise<LifecycleArtifact> {
   const lifecycle = await probeIsolatedAppServerLifecycle({
     clientVersion: readPackageVersion(),
-    command,
+    expectedCliVersion: PINNED_CODEX_CLI_VERSION,
     expectedModel: model,
     tools: [{
       name: "gcr_probe_echo",
@@ -126,6 +148,37 @@ async function lifecycleArtifact(model: string, executable: string | undefined):
     }]
   });
   return { ...baseArtifact("isolated-lifecycle"), mode: "isolated-lifecycle", lifecycle };
+}
+
+function readProbeBuildSha256(): string {
+  try {
+    const entries = fs.readdirSync(__dirname, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".js"))
+      .sort((left, right) => left.name.localeCompare(right.name));
+    if (entries.length === 0 || entries.length > MAX_PROBE_BUILD_FILES) throw new Error();
+    const hash = crypto.createHash("sha256");
+    for (const entry of entries) {
+      const file = path.join(__dirname, entry.name);
+      const stat = fs.lstatSync(file);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0 || stat.size > MAX_PROBE_BUILD_FILE_BYTES) throw new Error();
+      const bytes = fs.readFileSync(file);
+      if (bytes.length !== stat.size) throw new Error();
+      hash.update(String(Buffer.byteLength(entry.name, "utf8")) + ":" + entry.name + ":" + bytes.length + ":");
+      hash.update(bytes);
+    }
+    return hash.digest("hex");
+  } catch {
+    throw new Error("unable to read probe build identity");
+  }
+}
+
+async function authenticatedArtifact(model: string, codexHome: string): Promise<AuthenticatedArtifact> {
+  const authenticated = await probeAuthenticatedAppServer({
+    clientVersion: readPackageVersion(),
+    codexHome,
+    expectedModel: model
+  });
+  return { ...baseArtifact("authenticated-tool-roundtrip"), mode: "authenticated-tool-roundtrip", authenticated };
 }
 
 function readPackageVersion(): string {
@@ -167,7 +220,8 @@ function writeArtifact(outputPath: string, artifact: ProbeArtifact): void {
     fs.fsyncSync(descriptor);
     fs.closeSync(descriptor);
     descriptor = undefined;
-    fs.renameSync(temporaryPath, outputPath);
+    fs.linkSync(temporaryPath, outputPath);
+    fs.unlinkSync(temporaryPath);
     temporaryPath = undefined;
   } catch (error: unknown) {
     if (error instanceof Error && error.message.startsWith("unable to ")) throw error;
@@ -202,17 +256,35 @@ function printDecision(decision: BridgeDecision): void {
 
 async function run(args: readonly string[]): Promise<number> {
   const options = parseArgs(args);
+  const outputPath = path.resolve(process.cwd(), options.output ?? DEFAULT_OUTPUTS[options.mode]);
+  prepareArtifactOutput(outputPath);
   let artifact: ProbeArtifact;
   if (options.mode === "fixtures-only") artifact = fixtureArtifact();
-  else if (options.mode === "schemas-only") artifact = await schemaArtifact(options.codexExecutable);
-  else {
-    if (options.model === undefined) throw new Error("--model is required for isolated lifecycle mode");
-    artifact = await lifecycleArtifact(options.model, options.codexExecutable);
+  else if (options.mode === "schemas-only") artifact = await schemaArtifact();
+  else if (options.mode === "isolated-lifecycle") {
+    if (options.model === undefined) throw new Error("--model is required for live local probes");
+    artifact = await lifecycleArtifact(options.model);
+  } else {
+    if (options.model === undefined || options.codexHome === undefined) throw new Error("authenticated probe configuration is incomplete");
+    artifact = await authenticatedArtifact(options.model, options.codexHome);
   }
-  const outputPath = path.resolve(process.cwd(), options.output ?? DEFAULT_OUTPUTS[options.mode]);
   writeArtifact(outputPath, artifact);
   printDecision(artifact.decision);
   return artifact.decision.RELEASE_GATE === "BLOCKED" ? 1 : 0;
+}
+
+function prepareArtifactOutput(outputPath: string): void {
+  try {
+    fs.lstatSync(outputPath);
+    throw new Error("output exists");
+  } catch (error: unknown) {
+    if (isNotFound(error)) return;
+    throw new Error("unable to prepare probe report");
+  }
+}
+
+function isNotFound(error: unknown): boolean {
+  return error !== null && typeof error === "object" && "code" in error && error.code === "ENOENT";
 }
 
 void run(process.argv.slice(2)).then((code) => {

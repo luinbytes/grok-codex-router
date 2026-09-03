@@ -93,7 +93,7 @@ test("installed schema probe rejects invalid options without exposing their valu
   const secret = "sk-proj-private-command";
   let message = "";
   try {
-    await probeInstalledAppServerSchemas({ executable: secret, timeoutMs: 0 });
+    await probeInstalledAppServerSchemas({ timeoutMs: 0, privateValue: secret } as { timeoutMs: number });
   } catch (error: unknown) {
     message = error instanceof Error ? error.message : "unknown";
   }
@@ -102,10 +102,10 @@ test("installed schema probe rejects invalid options without exposing their valu
 });
 
 test("installed schema probe terminates descendants of a timed-out wrapper", { skip: process.platform === "win32" }, async () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "gcr-schema-process-test-"));
-  const executable = path.join(directory, "codex-wrapper");
+  const directory = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "gcr-schema-process-test-"));
+  const executable = path.join(directory, "codex");
   const pidFile = path.join(directory, "descendant.pid");
-  const wrapper = `#!/usr/bin/env node
+  const wrapper = `#!${process.execPath}
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
@@ -113,12 +113,58 @@ const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { s
 fs.writeFileSync(path.join(__dirname, "descendant.pid"), String(child.pid));
 setInterval(() => {}, 1000);
 `;
+  const previousPath = process.env.PATH;
   try {
     fs.writeFileSync(executable, wrapper, { mode: 0o700 });
-    await assert.rejects(() => probeInstalledAppServerSchemas({ executable, timeoutMs: 500 }), /schema probe failure/);
+    process.env.PATH = directory;
+    await assert.rejects(() => probeInstalledAppServerSchemas({ timeoutMs: 2_000 }), /schema probe failure/);
     const descendantPid = Number(fs.readFileSync(pidFile, "utf8"));
     assert.equal(await waitForProcessExit(descendantPid), true);
   } finally {
+    if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("installed schema probe proves successful schema child groups are closed", { skip: process.platform === "win32" }, async () => {
+  const directory = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "gcr-schema-success-test-"));
+  const executable = path.join(directory, "codex");
+  const pidFile = path.join(directory, "descendants.pid");
+  const wrapper = `#!${process.execPath}
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawn } = require("node:child_process");
+if (process.argv.includes("--version")) {
+  process.stdout.write("codex-cli 0.151.0\\n");
+  process.exit(0);
+}
+const outputIndex = process.argv.indexOf("--out");
+if (outputIndex < 0 || !process.argv[outputIndex + 1]) process.exit(2);
+const output = process.argv[outputIndex + 1];
+const experimental = process.argv.includes("--experimental");
+fs.mkdirSync(path.join(output, "v2"), { recursive: true });
+fs.writeFileSync(path.join(output, "codex_app_server_protocol.v2.schemas.json"), JSON.stringify({ definitions: {}, title: "CodexAppServerProtocolV2", type: "object" }) + "\\n");
+const properties = experimental
+  ? { dynamicTools: { default: null, items: { $ref: "#/definitions/DynamicToolSpec" }, type: ["array", "null"] }, model: { type: "string" } }
+  : { model: { type: "string" } };
+fs.writeFileSync(path.join(output, "v2", "ThreadStartParams.json"), JSON.stringify({ properties }));
+const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+fs.appendFileSync(${JSON.stringify(pidFile)}, String(child.pid) + "\\n");
+process.exit(0);
+`;
+  const previousPath = process.env.PATH;
+  try {
+    fs.writeFileSync(executable, wrapper, { mode: 0o700 });
+    process.env.PATH = directory;
+    const receipt = await probeInstalledAppServerSchemas({ timeoutMs: 2_000 });
+    assert.equal(receipt.cliVersion, "0.151.0");
+    assert.match(receipt.codexCliSha256 ?? "", /^[a-f0-9]{64}$/);
+    assert.equal(receipt.processContainment, "same-process-group-only");
+    const pids = fs.readFileSync(pidFile, "utf8").trim().split("\n").map(Number);
+    assert.equal(pids.length, 2);
+    for (const pid of pids) assert.equal(await waitForProcessExit(pid), true);
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath;
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });

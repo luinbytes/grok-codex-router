@@ -15,16 +15,25 @@ import {
   type ResponseMethod
 } from "./app-server-candidate.js";
 import type { BridgeEvent, CallId } from "./bridge-contract.js";
+import { ISOLATED_APP_SERVER_ARGS } from "./app-server-launch.js";
 import {
   isolatedCodexEnvironment,
-  signalIsolatedProcessTree,
-  supportsIsolatedProcessTree
+  PINNED_CODEX_CLI_VERSION,
+  processGroupExists,
+  resolvePinnedCodexExecutable,
+  revalidatePinnedCodexExecutable,
+  signalOwnedProcessGroup,
+  supportsAuthenticatedAppServerPlatform,
+  supportsOwnedProcessGroup,
+  waitForProcessGroupExit,
+  type VerifiedCodexExecutable
 } from "./codex-process.js";
 
 export const MAX_APP_SERVER_LINE_BYTES = 4 * 1024 * 1024;
 const MAX_APP_SERVER_QUEUE_MESSAGES = 64;
 const MAX_APP_SERVER_STDERR_BYTES = 64 * 1024;
 const MAX_APP_SERVER_FRAMES_PER_CHUNK = 64;
+const MAX_APP_SERVER_AUDIT_MESSAGES = 64;
 const MAX_COMMAND_FIELD_BYTES = 16 * 1024;
 const MAX_TOOL_COUNT = 256;
 const MAX_DYNAMIC_TOOL_ITEM_BYTES = 1024 * 1024;
@@ -33,11 +42,6 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 1_000;
 const MAX_REQUEST_TIMEOUT_MS = 5 * 60_000;
 const MAX_SHUTDOWN_TIMEOUT_MS = 10_000;
-
-interface AppServerCommand {
-  readonly executable: string;
-  readonly args: readonly string[];
-}
 
 interface AppServerDynamicTool {
   readonly name: string;
@@ -56,10 +60,11 @@ interface DynamicToolResult {
 }
 
 export interface AppServerStdioClientOptions {
-  readonly command?: AppServerCommand;
+  readonly executable: VerifiedCodexExecutable;
   readonly cwd: string;
   readonly codexHome: string;
   readonly clientVersion: string;
+  readonly expectedCliVersion: string;
   readonly expectedModel: string;
   readonly tools: readonly AppServerDynamicTool[];
   readonly requestTimeoutMs?: number;
@@ -69,27 +74,40 @@ export interface AppServerStdioClientOptions {
 
 export interface AppServerStdioClient {
   initialize(): Promise<void>;
+  verifyFileCredentialStore(): Promise<"file">;
   readAccount(): Promise<"signed-in" | "signed-out">;
   listModels(): Promise<"model-available">;
+  listMcpServers(): Promise<"mcp-inventoried">;
+  listHooks(): Promise<"hooks-inventoried">;
   startThread(): Promise<void>;
+  verifyThreadIsolation(): Promise<"isolation-verified">;
   auditUntilIdle(idleMs: number): Promise<"quiet">;
   startTurn(text: string): Promise<void>;
   interruptTurn(): Promise<Extract<BridgeEvent, { readonly kind: "cancellation" }>>;
   next(): Promise<AppServerParseResult>;
-  respondToDynamicTool(id: RequestId, result: DynamicToolResult): Promise<Extract<BridgeEvent, { readonly kind: "tool-result" }>>;
+  respondToDynamicTool(lease: DynamicToolLease, result: DynamicToolResult): Promise<Extract<BridgeEvent, { readonly kind: "tool-result" }>>;
   close(): Promise<void>;
 }
 
+type DynamicToolLease = Extract<AppServerParseResult, { readonly kind: "tool-handoff" }>;
+
 export interface AppServerLifecycleReceipt {
   readonly candidate: "app-server-dynamic";
+  readonly codexCliVersion: "0.151.0";
+  readonly codexCliSha256: string;
   readonly protocol: "stdio-jsonl";
   readonly authenticationOwner: "codex";
-  readonly authenticationStatus: "signed-in" | "signed-out";
+  readonly authenticationStatus: "signed-out";
+  readonly credentialStore: "effective-file";
   readonly modelStatus: "available";
+  readonly mcpIsolation: "disabled-before-turn";
+  readonly hookIsolation: "configured-and-quiet";
   readonly threadPolicy: "ephemeral-read-only-no-network";
   readonly threadStart: "accepted";
   readonly postStartAudit: "quiet";
-  readonly directProcess: "closed";
+  readonly processGroup: "closed";
+  readonly processContainment: "same-process-group-only";
+  readonly startupIsolation: "observed-after-start";
   readonly releaseEligibility: "blocked";
 }
 
@@ -154,7 +172,7 @@ export function createBoundedJsonlDecoder(maxLineBytes = MAX_APP_SERVER_LINE_BYT
 
 export function openAppServerStdioClient(options: AppServerStdioClientOptions): AppServerStdioClient {
   try {
-    if (!supportsIsolatedProcessTree(process.platform)) throw protocolError();
+    if (!supportsAuthenticatedAppServerPlatform(process.platform)) throw protocolError();
     validateOptions(options);
     return new StdioClient(options);
   } catch {
@@ -163,37 +181,58 @@ export function openAppServerStdioClient(options: AppServerStdioClientOptions): 
 }
 
 export async function probeIsolatedAppServerLifecycle(
-  options: Omit<AppServerStdioClientOptions, "codexHome" | "cwd">
+  options: Omit<AppServerStdioClientOptions, "codexHome" | "cwd" | "executable">
 ): Promise<AppServerLifecycleReceipt> {
-  if (!supportsIsolatedProcessTree(process.platform)) throw new Error("isolated app server lifecycle failure");
-  const isolatedRoot = fs.mkdtempSync(path.join(os.tmpdir(), "gcr-app-server-isolated-"));
+  if (!supportsAuthenticatedAppServerPlatform(process.platform)) throw new Error("isolated app server lifecycle failure");
+  const isolatedRoot = createIsolatedRoot();
   const isolatedCodexHome = path.join(isolatedRoot, "codex-home");
   const isolatedWorkspace = path.join(isolatedRoot, "workspace");
   try {
+    if (options.expectedCliVersion !== PINNED_CODEX_CLI_VERSION) throw new Error("isolated app server lifecycle failure");
     fs.mkdirSync(isolatedCodexHome, { mode: 0o700 });
     fs.mkdirSync(isolatedWorkspace, { mode: 0o700 });
     let client: AppServerStdioClient | undefined;
+    let codexCliSha256: string | undefined;
     try {
+      const codex = await resolvePinnedCodexExecutable(isolatedCodexHome, Math.min(
+        options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+        60_000
+      ));
+      codexCliSha256 = codex.sha256;
+      revalidatePinnedCodexExecutable(codex);
       client = openAppServerStdioClient({
         ...options,
+        executable: codex,
         codexHome: isolatedCodexHome,
         cwd: isolatedWorkspace
       });
       await client.initialize();
+      await client.verifyFileCredentialStore();
       const authenticationStatus = await client.readAccount();
+      if (authenticationStatus !== "signed-out") throw new Error("isolated app server lifecycle failure");
       await client.listModels();
+      await client.listMcpServers();
+      await client.listHooks();
       await client.startThread();
+      await client.verifyThreadIsolation();
       await client.auditUntilIdle(100);
       return {
         candidate: "app-server-dynamic",
+        codexCliVersion: PINNED_CODEX_CLI_VERSION,
+        codexCliSha256,
         protocol: "stdio-jsonl",
         authenticationOwner: "codex",
         authenticationStatus,
+        credentialStore: "effective-file",
         modelStatus: "available",
+        mcpIsolation: "disabled-before-turn",
+        hookIsolation: "configured-and-quiet",
         threadPolicy: "ephemeral-read-only-no-network",
         threadStart: "accepted",
         postStartAudit: "quiet",
-        directProcess: "closed",
+        processGroup: "closed",
+        processContainment: "same-process-group-only",
+        startupIsolation: "observed-after-start",
         releaseEligibility: "blocked"
       };
     } finally {
@@ -214,6 +253,7 @@ class StdioClient implements AppServerStdioClient {
   private readonly parser = createAppServerMessageParser();
   private readonly transport: StdioTransport;
   private readonly expectedModel: string;
+  private readonly expectedCliVersion: string;
   private readonly cwd: string;
   private readonly clientVersion: string;
   private readonly tools: readonly AppServerDynamicTool[];
@@ -221,10 +261,16 @@ class StdioClient implements AppServerStdioClient {
   private readonly signal: AbortSignal | undefined;
   private readonly pendingEvents: AppServerParseResult[] = [];
   private readonly pendingMessages: unknown[] = [];
-  private readonly outstandingTools = new Map<RequestId, CallId>();
-  private phase: "started" | "initialized" | "account-read" | "models-listed" | "thread-started" | "closed" = "started";
+  private readonly outstandingTools = new Map<RequestId, DynamicToolLease>();
+  private readonly resolvedTools = new Map<CallId, DynamicToolResult>();
+  private readonly completedTools = new Set<CallId>();
+  private phase: "started" | "initialized" | "account-read" | "models-listed" | "mcp-inventoried" | "hooks-inventoried" | "thread-started" | "closed" = "started";
   private activeThreadId: string | undefined;
   private activeTurnId: string | undefined;
+  private configuredMcpServerNames: readonly string[] = [];
+  private configuredHookKeys: readonly string[] = [];
+  private threadIsolationVerified = false;
+  private credentialStoreVerified = false;
   private nextRequestId = 1;
   private operationInFlight = false;
   private operationCompletion: Promise<void> | undefined;
@@ -232,6 +278,7 @@ class StdioClient implements AppServerStdioClient {
 
   constructor(options: AppServerStdioClientOptions) {
     this.expectedModel = options.expectedModel;
+    this.expectedCliVersion = options.expectedCliVersion;
     this.cwd = options.cwd;
     this.clientVersion = options.clientVersion;
     this.tools = options.tools.map((tool) => {
@@ -245,10 +292,9 @@ class StdioClient implements AppServerStdioClient {
     });
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.signal = options.signal;
+    revalidatePinnedCodexExecutable(options.executable);
     this.transport = new StdioTransport(
-      options.command === undefined
-        ? { executable: "codex", args: ["app-server", "--stdio"] }
-        : { executable: options.command.executable, args: [...options.command.args] },
+      options.executable.executable,
       options.cwd,
       options.codexHome,
       options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS
@@ -262,7 +308,7 @@ class StdioClient implements AppServerStdioClient {
         clientInfo: { name: "grok-codex-router", title: "Grok Codex Router", version: this.clientVersion },
         capabilities: {
           experimentalApi: true,
-          optOutNotificationMethods: ["warning"],
+          optOutNotificationMethods: ["warning", "thread/tokenUsage/updated", "account/rateLimits/updated"],
           requestAttestation: false
         }
       });
@@ -270,6 +316,17 @@ class StdioClient implements AppServerStdioClient {
       await this.transport.send({ method: "initialized", params: {} });
       this.requirePhase("started");
       this.phase = "initialized";
+    });
+  }
+
+  async verifyFileCredentialStore(): Promise<"file"> {
+    return this.exclusive<"file">(async () => {
+      this.requirePhase("initialized");
+      if (this.credentialStoreVerified) throw protocolError();
+      const result = await this.exchange("config/read", { cwd: this.cwd, includeLayers: false });
+      if (result.kind !== "lifecycle" || result.lifecycle !== "credential-store-file") throw protocolError();
+      this.credentialStoreVerified = true;
+      return "file";
     });
   }
 
@@ -297,14 +354,39 @@ class StdioClient implements AppServerStdioClient {
     });
   }
 
+  async listMcpServers(): Promise<"mcp-inventoried"> {
+    return this.exclusive<"mcp-inventoried">(async () => {
+      this.requirePhase("models-listed");
+      const result = await this.exchange("mcpServerStatus/list", { detail: "toolsAndAuthOnly", limit: 256 });
+      if (result.kind !== "lifecycle" || result.lifecycle !== "mcp-inventory") throw protocolError();
+      this.configuredMcpServerNames = [...result.serverNames];
+      this.phase = "mcp-inventoried";
+      return "mcp-inventoried";
+    });
+  }
+
+  async listHooks(): Promise<"hooks-inventoried"> {
+    return this.exclusive<"hooks-inventoried">(async () => {
+      this.requirePhase("mcp-inventoried");
+      const result = await this.exchange("hooks/list", { cwds: [this.cwd] });
+      if (result.kind !== "lifecycle" || result.lifecycle !== "hooks-inventory") throw protocolError();
+      this.configuredHookKeys = [...result.hookKeys];
+      this.phase = "hooks-inventoried";
+      return "hooks-inventoried";
+    });
+  }
+
   async startThread(): Promise<void> {
     return this.exclusive(async () => {
-      this.requirePhase("models-listed");
+      this.requirePhase("hooks-inventoried");
       const result = await this.exchange("thread/start", {
         allowProviderModelFallback: false,
         approvalPolicy: "never",
         approvalsReviewer: "user",
+        baseInstructions: "Use only the supplied dynamic tool. Do not use any built-in capability.",
+        config: isolationConfig(this.configuredMcpServerNames, this.configuredHookKeys),
         cwd: this.cwd,
+        developerInstructions: "Call the supplied dynamic tool exactly as requested. Do nothing else.",
         dynamicTools: this.tools.map((tool) => ({
           type: "function",
           name: tool.name,
@@ -328,17 +410,35 @@ class StdioClient implements AppServerStdioClient {
         this.activeThreadId = undefined;
         throw error;
       }
-      this.requirePhase("models-listed");
+      this.requirePhase("hooks-inventoried");
       this.phase = "thread-started";
+    });
+  }
+
+  async verifyThreadIsolation(): Promise<"isolation-verified"> {
+    return this.exclusive<"isolation-verified">(async () => {
+      this.requirePhase("thread-started");
+      if (this.activeThreadId === undefined || this.activeTurnId !== undefined || this.threadIsolationVerified) throw protocolError();
+      const result = await this.exchange("mcpServerStatus/list", {
+        detail: "toolsAndAuthOnly",
+        limit: 256,
+        threadId: this.activeThreadId
+      }, this.configuredMcpServerNames);
+      if (result.kind !== "lifecycle" || result.lifecycle !== "mcp-disabled") throw protocolError();
+      this.threadIsolationVerified = true;
+      return "isolation-verified";
     });
   }
 
   async startTurn(text: string): Promise<void> {
     return this.exclusive(async () => {
       this.requirePhase("thread-started");
-      if (this.activeThreadId === undefined || this.activeTurnId !== undefined || !isBoundedNonEmptyString(text, MAX_APP_SERVER_LINE_BYTES)) {
+      if (this.activeThreadId === undefined || this.activeTurnId !== undefined || !this.threadIsolationVerified
+        || !isBoundedNonEmptyString(text, MAX_APP_SERVER_LINE_BYTES)) {
         throw protocolError();
       }
+      this.resolvedTools.clear();
+      this.completedTools.clear();
       const result = await this.exchange("turn/start", {
         input: [{ type: "text", text }],
         threadId: this.activeThreadId
@@ -359,7 +459,7 @@ class StdioClient implements AppServerStdioClient {
     return this.exclusive<"quiet">(async () => {
       this.requirePhase("thread-started");
       if (!isPositiveInteger(idleMs) || idleMs > 1_000) throw protocolError();
-      while (true) {
+      for (let messageCount = 0; messageCount < MAX_APP_SERVER_AUDIT_MESSAGES; messageCount += 1) {
         let raw: unknown;
         try {
           raw = await this.receiveRaw(idleMs);
@@ -371,6 +471,7 @@ class StdioClient implements AppServerStdioClient {
         if (result.kind === "rejected") throw candidateError(result.code);
         if (result.kind !== "accepted") throw protocolError();
       }
+      throw protocolError();
     });
   }
 
@@ -393,12 +494,29 @@ class StdioClient implements AppServerStdioClient {
       this.requirePhase("thread-started");
       while (true) {
         const queued = this.pendingEvents.shift();
-        const result = queued ?? this.parse(await this.receiveRaw());
+        const raw = queued === undefined ? await this.receiveRaw() : undefined;
+        const result = queued ?? this.parse(raw);
         if (result.kind === "rejected") throw candidateError(result.code);
+        if (raw !== undefined && isCompletedDynamicToolNotification(raw)) {
+          const completion = dynamicToolCompletionFromNotification(raw);
+          const expectedResult = completion === undefined ? undefined : this.resolvedTools.get(completion.callId);
+          if (completion === undefined || expectedResult === undefined || !sameDynamicToolResult(expectedResult, completion.result)) {
+            throw candidateError("protocol-failure");
+          }
+          this.completedTools.add(completion.callId);
+        }
         if (result.kind === "accepted") continue;
-        if (result.kind === "tool-handoff") this.outstandingTools.set(result.requestId, result.callId);
+        if (result.kind === "tool-handoff") {
+          const storedArguments = cloneBoundedJsonObject(result.arguments);
+          if (storedArguments === undefined) throw candidateError("protocol-failure");
+          this.outstandingTools.set(result.requestId, {
+            ...result,
+            arguments: storedArguments,
+            event: { ...result.event }
+          });
+        }
         if (result.kind === "events" && result.events.some((event) => event.kind === "completed")) {
-          if (this.outstandingTools.size !== 0) throw candidateError("protocol-failure");
+          if (this.outstandingTools.size !== 0 || this.resolvedTools.size !== this.completedTools.size) throw candidateError("protocol-failure");
           this.activeTurnId = undefined;
           this.outstandingTools.clear();
         }
@@ -408,16 +526,18 @@ class StdioClient implements AppServerStdioClient {
     });
   }
 
-  async respondToDynamicTool(id: RequestId, result: DynamicToolResult): Promise<Extract<BridgeEvent, { readonly kind: "tool-result" }>> {
+  async respondToDynamicTool(lease: DynamicToolLease, result: DynamicToolResult): Promise<Extract<BridgeEvent, { readonly kind: "tool-result" }>> {
     return this.exclusive(async () => {
       this.requirePhase("thread-started");
-      const call = this.outstandingTools.get(id);
+      const leaseId = leaseRequestId(lease);
+      const storedLease = leaseId === undefined ? undefined : this.outstandingTools.get(leaseId);
       const safeResult = normalizeDynamicToolResult(result);
-      if (call === undefined || safeResult === undefined) throw protocolError();
-      this.outstandingTools.delete(id);
-      await this.transport.send({ id, result: safeResult });
+      if (storedLease === undefined || safeResult === undefined || !sameLease(storedLease, lease)) throw protocolError();
+      this.outstandingTools.delete(storedLease.requestId);
+      this.resolvedTools.set(storedLease.callId, safeResult);
+      await this.transport.send({ id: storedLease.requestId, result: safeResult });
       this.requirePhase("thread-started");
-      return recordGrokToolResult(call);
+      return recordGrokToolResult(storedLease.callId);
     });
   }
 
@@ -436,12 +556,21 @@ class StdioClient implements AppServerStdioClient {
       this.pendingEvents.length = 0;
       this.pendingMessages.length = 0;
       this.outstandingTools.clear();
+      this.resolvedTools.clear();
+      this.completedTools.clear();
+      this.configuredMcpServerNames = [];
+      this.configuredHookKeys = [];
+      this.threadIsolationVerified = false;
       if (closeFailure !== undefined) throw closeFailure;
     })();
     return this.closePromise;
   }
 
-  private async exchange(method: ResponseMethod, params: JsonObject): Promise<AppServerParseResult> {
+  private async exchange(
+    method: ResponseMethod,
+    params: JsonObject,
+    expectedDisabledMcpServerNames?: readonly string[]
+  ): Promise<AppServerParseResult> {
     this.drainPendingMessages();
     const id = requestId(this.nextRequestId);
     this.nextRequestId += 1;
@@ -449,7 +578,7 @@ class StdioClient implements AppServerStdioClient {
     while (true) {
       const raw = await this.transport.receive(this.requestTimeoutMs, this.signal);
       if (isExpectedResponseEnvelope(raw, id)) {
-        const result = this.parse(raw, { id, method });
+        const result = this.parse(raw, { id, method }, expectedDisabledMcpServerNames);
         if (result.kind === "rejected") throw candidateError(result.code);
         return result;
       }
@@ -518,12 +647,18 @@ class StdioClient implements AppServerStdioClient {
     }
   }
 
-  private parse(raw: unknown, expectedResponse?: { readonly id: RequestId; readonly method: ResponseMethod }): AppServerParseResult {
+  private parse(
+    raw: unknown,
+    expectedResponse?: { readonly id: RequestId; readonly method: ResponseMethod },
+    expectedDisabledMcpServerNames?: readonly string[]
+  ): AppServerParseResult {
     const context: AppServerCandidateContext = {
       candidate: "app-server-dynamic",
       expectedCwd: this.cwd,
+      expectedCliVersion: this.expectedCliVersion,
       expectedModel: this.expectedModel,
       registeredToolNames: this.tools.map((tool) => tool.name),
+      ...(expectedDisabledMcpServerNames === undefined ? {} : { expectedDisabledMcpServerNames }),
       ...(this.activeThreadId === undefined ? {} : { activeThreadId: this.activeThreadId }),
       ...(this.activeTurnId === undefined ? {} : { activeTurnId: this.activeTurnId }),
       ...(expectedResponse === undefined ? {} : { expectedResponse })
@@ -536,8 +671,17 @@ class StdioClient implements AppServerStdioClient {
   }
 }
 
+function createIsolatedRoot(): string {
+  try {
+    return fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "gcr-app-server-isolated-"));
+  } catch {
+    throw new Error("isolated app server lifecycle failure");
+  }
+}
+
 class StdioTransport {
   private readonly child: ChildProcessWithoutNullStreams;
+  private readonly leaderPid: number | undefined;
   private readonly decoder = createBoundedJsonlDecoder();
   private readonly shutdownTimeoutMs: number;
   private readonly messages: unknown[] = [];
@@ -550,16 +694,17 @@ class StdioTransport {
   private closed = false;
   private paused = false;
 
-  constructor(command: AppServerCommand, cwd: string, codexHome: string, shutdownTimeoutMs: number) {
+  constructor(executable: string, cwd: string, codexHome: string, shutdownTimeoutMs: number) {
     this.shutdownTimeoutMs = shutdownTimeoutMs;
     this.exit = new Promise((resolve) => { this.resolveExit = resolve; });
-    this.child = spawn(command.executable, command.args, {
+    this.child = spawn(executable, ISOLATED_APP_SERVER_ARGS, {
       cwd,
-      detached: supportsIsolatedProcessTree(process.platform),
+      detached: supportsOwnedProcessGroup(process.platform),
       env: isolatedCodexEnvironment(codexHome),
       shell: false,
       stdio: ["pipe", "pipe", "pipe"]
     });
+    this.leaderPid = this.child.pid;
     this.child.stdout.on("data", (chunk: Buffer) => this.acceptStdout(chunk));
     this.child.stderr.on("data", (chunk: Buffer) => {
       this.stderrBytes += chunk.length;
@@ -625,11 +770,20 @@ class StdioTransport {
     this.waiter?.reject(processError());
     this.waiter = undefined;
     if (!this.closed) this.child.stdin.end();
-    if (await settlesWithin(this.exit, this.shutdownTimeoutMs)) return;
-    signalIsolatedProcessTree(this.child, "SIGTERM");
-    if (await settlesWithin(this.exit, this.shutdownTimeoutMs)) return;
-    signalIsolatedProcessTree(this.child, "SIGKILL");
-    if (!await settlesWithin(this.exit, this.shutdownTimeoutMs)) throw processError();
+    if (!await settlesWithin(this.exit, this.shutdownTimeoutMs)) {
+      signalOwnedProcessGroup(this.child, "SIGTERM");
+      if (!await settlesWithin(this.exit, this.shutdownTimeoutMs)) {
+        signalOwnedProcessGroup(this.child, "SIGKILL");
+        if (!await settlesWithin(this.exit, this.shutdownTimeoutMs)) throw processError();
+      }
+    }
+    if (this.leaderPid !== undefined && processGroupExists(this.leaderPid)) {
+      signalOwnedProcessGroup(this.child, "SIGTERM");
+      if (!await waitForProcessGroupExit(this.leaderPid, this.shutdownTimeoutMs)) {
+        signalOwnedProcessGroup(this.child, "SIGKILL");
+        if (!await waitForProcessGroupExit(this.leaderPid, this.shutdownTimeoutMs)) throw processError();
+      }
+    }
     this.child.stdout.destroy();
     this.child.stderr.destroy();
   }
@@ -674,32 +828,62 @@ class StdioTransport {
     this.failure = error;
     this.waiter?.reject(error);
     this.waiter = undefined;
-    if (!this.closed) signalIsolatedProcessTree(this.child, "SIGTERM");
+    if (!this.closed) signalOwnedProcessGroup(this.child, "SIGTERM");
   }
+}
+
+function isolationConfig(mcpServerNames: readonly string[], hookKeys: readonly string[]): JsonObject {
+  const mcpServers: Record<string, JsonObject> = Object.create(null) as Record<string, JsonObject>;
+  for (const name of mcpServerNames) mcpServers[name] = { enabled: false };
+  const hookState: Record<string, JsonObject> = Object.create(null) as Record<string, JsonObject>;
+  for (const key of hookKeys) hookState[key] = { enabled: false };
+  return {
+    features: {
+      apps: false,
+      auth_elicitation: false,
+      hooks: false,
+      memories: false,
+      plugin_sharing: false,
+      plugins: false,
+      remote_plugin: false,
+      request_permissions_tool: false,
+      skill_mcp_dependency_install: false,
+      skill_search: false,
+      skip_host_skill_discovery: true,
+      tool_call_mcp_elicitation: false,
+      tool_suggest: false,
+      workspace_dependencies: false
+    },
+    hooks: { state: hookState },
+    include_apps_instructions: false,
+    include_collaboration_mode_instructions: false,
+    include_environment_context: false,
+    include_permissions_instructions: false,
+    mcp_servers: mcpServers,
+    notify: []
+  };
 }
 
 function validateOptions(options: AppServerStdioClientOptions): void {
   if (!isPlainRecord(options)
-    || !hasOnlyKeys(options, ["clientVersion", "codexHome", "command", "cwd", "expectedModel", "requestTimeoutMs", "shutdownTimeoutMs", "signal", "tools"])
+    || !hasOnlyKeys(options, ["clientVersion", "codexHome", "cwd", "executable", "expectedCliVersion", "expectedModel", "requestTimeoutMs", "shutdownTimeoutMs", "signal", "tools"])
     || !path.isAbsolute(options.cwd) || !isBoundedNonEmptyString(options.cwd, MAX_COMMAND_FIELD_BYTES)
     || !isBoundedNonEmptyString(options.clientVersion, MAX_COMMAND_FIELD_BYTES)
+    || options.expectedCliVersion !== PINNED_CODEX_CLI_VERSION
     || !isBoundedNonEmptyString(options.expectedModel, MAX_COMMAND_FIELD_BYTES)
-    || !path.isAbsolute(options.codexHome) || !isBoundedNonEmptyString(options.codexHome, MAX_COMMAND_FIELD_BYTES)
+    || !isAbsoluteBoundedPath(options.codexHome)
     || !Array.isArray(options.tools) || options.tools.length > MAX_TOOL_COUNT
     || !options.tools.every(isDynamicTool)
     || new Set(options.tools.map((tool) => tool.name)).size !== options.tools.length
     || (options.requestTimeoutMs !== undefined && (!isPositiveInteger(options.requestTimeoutMs) || options.requestTimeoutMs > MAX_REQUEST_TIMEOUT_MS))
     || (options.shutdownTimeoutMs !== undefined && (!isPositiveInteger(options.shutdownTimeoutMs) || options.shutdownTimeoutMs > MAX_SHUTDOWN_TIMEOUT_MS))
-    || (options.signal !== undefined && !(options.signal instanceof AbortSignal))
-    || (options.command !== undefined && !isCommand(options.command))) throw protocolError();
+    || (options.signal !== undefined && !(options.signal instanceof AbortSignal))) throw protocolError();
 }
 
-function isCommand(value: AppServerCommand): boolean {
-  return isPlainRecord(value) && hasOnlyKeys(value, ["args", "executable"])
-    && isBoundedNonEmptyString(value.executable, MAX_COMMAND_FIELD_BYTES)
-    && Array.isArray(value.args) && value.args.length <= 64
-    && value.args.every((argument) => isBoundedString(argument, MAX_COMMAND_FIELD_BYTES))
-    && Buffer.byteLength(value.args.join(""), "utf8") <= MAX_COMMAND_FIELD_BYTES;
+function isAbsoluteBoundedPath(value: unknown): value is string {
+  return typeof value === "string"
+    && path.isAbsolute(value)
+    && isBoundedNonEmptyString(value, MAX_COMMAND_FIELD_BYTES);
 }
 
 function isDynamicTool(value: AppServerDynamicTool): boolean {
@@ -739,6 +923,68 @@ function normalizeDynamicToolResult(value: DynamicToolResult): DynamicToolResult
   } catch {
     return undefined;
   }
+}
+
+function leaseRequestId(value: unknown): RequestId | undefined {
+  try {
+    if (!isPlainRecord(value)
+      || !hasOnlyKeys(value, ["arguments", "callId", "event", "executor", "kind", "requestId", "threadId", "tool", "turnId"])) return undefined;
+    return requestId(value.requestId as string | number);
+  } catch {
+    return undefined;
+  }
+}
+
+function sameLease(stored: DynamicToolLease, candidate: unknown): candidate is DynamicToolLease {
+  const candidateId = leaseRequestId(candidate);
+  if (candidateId === undefined || !isPlainRecord(candidate) || !isPlainRecord(candidate.event)) return false;
+  const candidateArguments = cloneBoundedJsonObject(candidate.arguments);
+  return candidate.kind === "tool-handoff"
+    && candidate.executor === "grok"
+    && candidateId === stored.requestId
+    && candidate.callId === stored.callId
+    && candidate.threadId === stored.threadId
+    && candidate.turnId === stored.turnId
+    && candidate.tool === stored.tool
+    && candidateArguments !== undefined
+    && sameJson(stored.arguments, candidateArguments)
+    && hasOnlyKeys(candidate.event, ["callId", "executor", "kind"])
+    && candidate.event.kind === "tool-request"
+    && candidate.event.callId === stored.callId
+    && candidate.event.executor === "grok";
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => sameJson(value, right[index]));
+  }
+  if (!isPlainRecord(left) || !isPlainRecord(right)) return false;
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key, index) => key === rightKeys[index] && sameJson(left[key], right[key]));
+}
+
+function isCompletedDynamicToolNotification(value: unknown): boolean {
+  if (!isPlainRecord(value) || value.method !== "item/completed" || !isPlainRecord(value.params)) return false;
+  const item = value.params.item;
+  return isPlainRecord(item) && item.type === "dynamicToolCall";
+}
+
+function dynamicToolCompletionFromNotification(value: unknown): { readonly callId: CallId; readonly result: DynamicToolResult } | undefined {
+  if (!isCompletedDynamicToolNotification(value)) return undefined;
+  const params = (value as Record<string, unknown>).params as Record<string, unknown>;
+  const item = params.item as Record<string, unknown>;
+  if (typeof item.id !== "string" || item.id.length === 0 || item.status !== "completed" || item.success !== true) return undefined;
+  const result = normalizeDynamicToolResult({ success: item.success, contentItems: item.contentItems } as DynamicToolResult);
+  return result === undefined ? undefined : { callId: item.id as CallId, result };
+}
+
+function sameDynamicToolResult(left: DynamicToolResult, right: DynamicToolResult): boolean {
+  return left.success === right.success && sameJson(left.contentItems, right.contentItems);
 }
 
 function isExpectedResponseEnvelope(raw: unknown, id: RequestId): boolean {
