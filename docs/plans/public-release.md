@@ -63,13 +63,13 @@ Every PR artifact uses short, concrete sentences and no abstract metaphors.
 
 ### Boot recipe, for every live lane
 
-Each lane runs against the PR head in a fresh supported Sand through a detected native Grok control capability. A missing capability blocks the lane. The ten scenarios may run serially to protect the host and any existing Codex login store.
+Each lane runs against the PR head in a fresh supported Sand through a detected native Grok control capability. A missing capability blocks the lane. The ten scenarios may run serially to protect the host and the router-dedicated Codex login store.
 
 - [ ] Fetch the branch and check out the exact head SHA. Record `git rev-parse HEAD` in the lane receipt.
 - [ ] Declare the lane class as `pre-install`, `installed-runtime`, or `release-asset`. Record the required starting files, services, and auth state before setup.
 - [ ] For an installed-runtime lane, create lane-local config, state, cache, backup, service, and log roots, then start the staged router and localhost control plane. Wait for `status --json` to report healthy.
 - [ ] For a pre-install or release-asset lane, prove router files, state, and services are absent. Let the command under test create them. Do not run the router CLI during setup.
-- [ ] Use the auth state named by the scenario. When a lane uses an existing Codex CLI login store, never copy, print, snapshot, or upload it. Signed-out lanes start without one.
+- [ ] Use the auth state named by the scenario. Signed-in lanes use a private router-dedicated `CODEX_HOME` authenticated only by the official Codex CLI. Signed-out lanes use a new empty dedicated home. Never use, copy, print, snapshot, or upload a person's ordinary Codex login store.
 - [ ] Deliver prompts and clicks only through the detected native Grok control capability. Use `grok-codex-router status --json`, `diagnose --json`, and redacted service logs as read-only diagnostics.
 - [ ] Create a lane-local evidence directory with `mktemp -d`. Save `<slug>.png` and `lane-evidence.json` there with the exact machine checks, pre-state and post-state hashes, process identities, redacted event audit, and predicate result. Return both paths, exact SHA, and command transcript.
 - [ ] Stop every lane-owned process and remove temporary state after its receipt is complete. Preserve only intentional screenshots, videos, and redacted logs.
@@ -82,8 +82,9 @@ Each lane runs against the PR head in a fresh supported Sand through a detected 
 
 - [ ] Create `scripts/probes/codex-bridge-probe.ts` for fixture and authenticated bridge trials.
 - [ ] Create `scripts/probes/app-server-candidate.ts` for local stdio JSON-RPC against a pinned Codex CLI, with dynamic-tool and local MCP variants.
+- [ ] Create `scripts/probes/app-server-stdio.ts`, `scripts/probes/app-server-authenticated.ts`, and `scripts/probes/codex-process.ts` for bounded transport, authenticated operation, and process ownership.
 - [ ] Create `scripts/probes/direct-candidate.ts` around the current Responses transport without changing production routing.
-- [ ] Create `tests/transport-contract.test.ts` with recorded, redacted event fixtures.
+- [ ] Create `tests/transport-contract.test.ts`, `tests/app-server-candidate.test.ts`, `tests/app-server-stdio.test.ts`, `tests/app-server-authenticated.test.ts`, and `tests/probe-cli.test.ts` with recorded or synthetic redacted events.
 - [ ] Create `docs/transport-decision.md` with the measured decision and support level.
 - [ ] Edit `package.json` to expose the probe and contract commands.
 
@@ -96,6 +97,8 @@ Each lane runs against the PR head in a fresh supported Sand through a detected 
 - [ ] Grant stable eligibility only when release-day official documentation supports the exact non-experimental path for production and it passes every scenario, leaves Grok as the sole tool executor, lets Codex CLI own auth, and exposes no built-in command or file tool.
 - [ ] Treat the MCP proxy as research-only unless it proves a passive schema and call envelope. Reject it if App Server owns tool execution, approval, continuation, retry, or a second agent loop.
 - [ ] Audit every App Server item against a deny-by-default allowlist. Any command, filesystem, terminal, web, approval, unexpected MCP, or unknown event blocks stable eligibility.
+- [ ] Require authenticated trials to use a private router-dedicated Codex home with no user config. Inventory MCP servers and hooks before the provider turn. Reject active or exposed MCP state, disable every discovered entry in thread config, and verify that the thread-scoped MCP inventory is disabled and empty of capabilities.
+- [ ] Resolve one fixed Codex executable through a safe absolute `PATH` entry, require Codex CLI 0.151.0 at successful thread startup, and report only fixed semantic values.
 - [ ] Keep the direct bridge as a read-only benchmark and fixture source. Its raw credential access makes it ineligible for every public artifact, including alpha.
 - [ ] Permit an alpha only when an App Server candidate passes every safety case with official Codex-owned auth. If no App Server candidate passes, stop the program.
 - [ ] Record the selected bridge, rejected bridge, pinned Codex version, event schema hash, limitations, and removal trigger in `docs/transport-decision.md`.
@@ -114,7 +117,7 @@ Each lane runs against the PR head in a fresh supported Sand through a detected 
 
 **Verify, live.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked. Ten lanes on `gpt-5.6-terra` at the PR head, per the boot recipe.
 
-- [ ] Lane 1. Check ChatGPT subscription login through all candidates without printing the credential store. Save `bridge-auth-status.png`. Pass when each candidate reports the same signed-in workspace or a documented candidate failure and no token appears.
+- [ ] Lane 1. Check ChatGPT subscription login through all candidates without printing the credential store or account identity. Save `bridge-auth-status.png`. Pass when each candidate reports semantic signed-in status or a documented candidate failure and no token appears.
 - [ ] Lane 2. Ask for a text-only answer and then describe a native image through all candidates. Save `bridge-plain-turn.png` and `bridge-image-turn.png`. Pass when every completed stream preserves text order, the image reaches Codex without exposing bytes or paths in the receipt, and the decision receipt classifies each failure.
 - [ ] Lane 3. Force one harmless Grok tool call through all candidates. Save `bridge-single-tool.png`. Pass when Grok executes exactly one named tool and receives exactly one result.
 - [ ] Lane 4. Request two independent harmless Grok tools through all candidates. Save `bridge-parallel-tools.png`. Pass when call IDs, arguments, and results remain paired with no built-in Codex tool execution.
@@ -158,7 +161,7 @@ Each lane runs against the PR head in a fresh supported Sand through a detected 
 **Build.**
 
 - [ ] Implement only the App Server mode selected by GCR-1. Delete every direct auth, transport, header, stream, continuation, retry, and dependency path from the staged runtime.
-- [ ] Use a pinned official Codex CLI, `codex login status`, and `model/list`. Never read, parse, refresh, copy, or log the credential store.
+- [ ] Use a pinned official Codex CLI, a router-dedicated `CODEX_HOME`, `codex login status`, and `model/list`. Only the official Codex CLI creates or refreshes the file-backed credential store. The router never reads, parses, copies, or logs it.
 - [ ] Preserve the existing Grok wire and turn contract, Grok-owned tools, cancellation, continuation, current summarization boundary support, and duplicate-anchor rejection.
 - [ ] Replace personal repository paths, fixed home directories, fixed Bun paths, and fixed model lists with runtime discovery and XDG-aware configuration.
 - [ ] Build staged x86_64 and arm64 runtime trees with compiled router code, static UI, and one release-owned pinned Bun runtime. Users do not clone Git, install npm packages, compile TypeScript, or run `bun link`.
@@ -227,7 +230,7 @@ Each lane runs against the PR head in a fresh supported Sand through a detected 
 - [ ] Make the install boundary the user's Grok Sand. Support Linux x86_64 and arm64. Do not patch macOS, Windows, WSL, Docker, or host Grok files directly.
 - [ ] Generate one release-specific command whose visible SHA-256 pins the downloaded bootstrap before execution. Do not publish a pipe-to-shell shortcut.
 - [ ] Declare POSIX `sh`, `curl`, `mktemp`, `sha256sum`, and archive extraction as the supported Sand bootstrap contract. Fail before managed-target mutation when one is absent.
-- [ ] Detect the Sand host, writable user paths, architecture, libc, bootstrap commands, existing router state, and existing Codex CLI login before any mutation.
+- [ ] Detect the Sand host, writable user paths, architecture, libc, bootstrap commands, existing router state, and router-dedicated Codex login before any mutation.
 - [ ] Build one validated `InstallContext` that owns release, config, state, cache, host, supervisor, control, log, runtime, architecture, and compatibility paths. Pass it to every lifecycle component.
 - [ ] Use XDG defaults with flags for every path. Never assume `/usr/local/bin/bun`, `~/sand-host`, `~/sand-data`, or a repository checkout.
 - [ ] Verify and use the release-owned pinned Bun from the architecture-specific runtime tree. Never select a global or unrelated user Bun.
@@ -241,14 +244,15 @@ Each lane runs against the PR head in a fresh supported Sand through a detected 
 - [ ] On any failure, stop lane-owned services, restore only the matching pristine host snapshot, remove the staged release, and leave a redacted diagnostic receipt.
 - [ ] Make repeated `install`, `update`, `rollback`, and `uninstall` calls idempotent. Never restore an old host snapshot over a newer Grok host.
 - [ ] Remove only manifest-owned files whose current hash still matches. Preserve drifted files and print their exact safe recovery action.
-- [ ] Preserve the Codex login store in place. Never copy it into router state. If login is absent, finish installation safely and print the official `codex login --device-auth` next step.
-- [ ] Make `check-secret-isolation.ts` emit only pre-state and post-state file hashes, forbidden-copy counts, and a boolean verdict. It never prints credential content or reusable token hashes.
+- [ ] Create a private router-dedicated Codex home with its fixed ownership marker. Never adopt or inspect a person's ordinary Codex home. If router login is absent, finish installation safely and print the exact official device-login command scoped to the dedicated home and the file-backed Codex credential store.
+- [ ] Preserve the router-dedicated Codex login store across install, update, rollback, and uninstall. Never copy it into router state.
+- [ ] Make `check-secret-isolation.ts` compare credential state in memory and emit only presence, unchanged-state, forbidden-copy count, and pass or fail fields. It never prints credential content, paths, file hashes, or account identity.
 - [ ] Bind the control plane to loopback, create service directories with mode `0700`, create secret-bearing files with mode `0600`, and redact auth headers, tokens, tool payload secrets, and account identity from logs.
 
 The release generator emits this command shape with an immutable tag and real digests.
 
 ```sh
-sh -c 'set -eu; v=v0.1.0-alpha.1; f=$(mktemp); trap '\''rm -f "$f"'\'' EXIT; curl -fsSL "https://github.com/luinbytes/grok-codex-router/releases/download/$v/install.sh" -o "$f"; printf "%s  %s\n" INSTALLER_SHA256 "$f" | sha256sum -c -; sh "$f" --release "$v" --manifest-sha256 MANIFEST_SHA256'
+sh -c 'set -eu; v=v0.1.0-alpha.1; f=$(mktemp); trap '\''rm -f "$f"'\'' EXIT; curl -fsSL "https://github.com/luinbytes/grokbot-codex-router/releases/download/$v/install.sh" -o "$f"; printf "%s  %s\n" INSTALLER_SHA256 "$f" | sha256sum -c -; sh "$f" --release "$v" --manifest-sha256 MANIFEST_SHA256'
 ```
 
 **You see.**
@@ -271,10 +275,10 @@ sh -c 'set -eu; v=v0.1.0-alpha.1; f=$(mktemp); trap '\''rm -f "$f"'\'' EXIT; cur
 - [ ] Lane 3. Run install twice in the same Sand. Save `install-idempotent.png`. Pass when the second run is a no-op and service identity remains stable.
 - [ ] Lane 4. Corrupt one downloaded byte. Save `install-bad-checksum.png`. Pass when no target changes, no service starts, and the checksum error names the asset.
 - [ ] Lane 5. Interrupt after staging and rerun. Save `install-resume.png`. Pass when the journal drives cleanup or resume and ends in one installed release.
-- [ ] Lane 6. Remove the Codex login store before install. Save `install-no-login.png`. Pass when installation succeeds without a copied secret and prints the official device login action.
+- [ ] Lane 6. Start without a router-dedicated Codex login store. Save `install-no-login.png`. Pass when installation succeeds without adopting another store and prints the exact dedicated-home device-login action.
 - [ ] Lane 7. Point the installer at an unknown host file. Save `install-unknown-host.png`. Pass when it fails closed before patching and native Grok remains healthy.
 - [ ] Lane 8. Run `status --json` and `diagnose --json` after install. Save `install-diagnostics.png`. Pass when paths, hashes, versions, and service state are useful and all identity data is redacted.
-- [ ] Lane 9. Hash the credential store, uninstall a healthy installation, and hash it again. Save `install-uninstall.png`. Pass when native Grok completes a turn, router processes stop, managed files are gone, the two file hashes match, and the secret-isolation report passes.
+- [ ] Lane 9. Compare the router-dedicated credential store before and after uninstall without persisting its hash. Save `install-uninstall.png`. Pass when native Grok completes a turn, router processes stop, managed files are gone, the store is unchanged, and the secret-isolation report passes.
 - [ ] Lane 10. Force the post-patch health check to fail. Save `install-rollback.png`. Pass when the matching pristine host returns atomically and native Grok completes a turn.
 
 **Verify, perf.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
@@ -382,7 +386,7 @@ sh -c 'set -eu; v=v0.1.0-alpha.1; f=$(mktemp); trap '\''rm -f "$f"'\'' EXIT; cur
 
 **Build.**
 
-- [ ] Keep `luinbytes/grok-codex-router` as the public fork with its upstream history. Preserve Igor Warzocha's MIT notice and add clear fork attribution. Do not rewrite authorship.
+- [ ] Create a new standalone repository under `luinbytes` only after GCR-1 through GCR-5 pass. Use `grokbot-codex-router` unless the name is unavailable. Preserve Igor Warzocha's MIT notice, credit the original project and developer in the README and `NOTICE`, and preserve upstream authorship. Keep the working fork as staging evidence, not the final install source.
 - [ ] Mark the package private to npm and remove accidental npm publication metadata. GitHub Releases are the only public distribution channel in v0.x.
 - [ ] Run credential, private path, proprietary fixture, generated artifact, dependency, and license scans on the repository and reachable history. If a secret is found, stop publication and rotate it before any history decision.
 - [ ] Run credential-free lint, typecheck, unit, fixture, installer container, compatibility, and package checks for public pull requests. Never expose Codex subscription credentials to forked pull requests.
@@ -453,7 +457,11 @@ sh -c 'set -eu; v=v0.1.0-alpha.1; f=$(mktemp); trap '\''rm -f "$f"'\'' EXIT; cur
 
 ## Appendix A. Prototype evidence
 
-No authenticated transport or native Grok prototype ran during planning. This host had no Sand host, installed router CLI, supervisor status, Sand data directory, or native Grok control capability. The prototype branch and SHA are therefore none. GCR-1 owns the transport bakeoff and cannot pass without live Sand evidence.
+The working fork now has a release-blocked GCR-1 prototype on `feature/public-release-gcr1` at `979c90f78bbf56e5897e0fd45feb3c96f08db75b`. It adds the bounded App Server parser and stdio client, exact Codex executable proof, signed-out lifecycle, strict dedicated-home admission, an authenticated single-tool diagnostic, create-only redacted receipts, and the shared ten-scenario fixture contract. It does not change production routing.
+
+At that SHA, the focused boundary suite passes 67 of 67 tests. The complete non-VM suite passes 93 of 93 with Knip, TypeScript build, and telemetry clean. The repository-wide check passes 94 of 97; only the three live VM contracts fail because this macOS worktree has no Sand host bundle, supervisor status, or Sand data root. The installed Codex 0.151.0 schema and signed-out lifecycle probes pass with binary SHA-256 `52e7b9519170c83ac9363d23e5d8b8ff116d211149614d098cb3ce10bef82d95`; every receipt still reports `SELECTED_BRIDGE=none` and `RELEASE_GATE=BLOCKED`.
+
+No authenticated provider turn or native Grok round trip ran. A fresh security review found and closed the sticky writable `PATH` and exported arbitrary-command seams, and its re-review found no regression. The formal security contract draft remains unsealed because its finalizer rejected a symlinked `/var` scan path; no completed security-scan claim is made. GCR-1 still cannot pass without a dedicated official Codex login, native Sand evidence, platform containment, continuation and cancellation trials, restart and concurrency trials, and performance receipts.
 
 Repository inspection used the clean `docs/public-release-plan` worktree based on `origin/main` at `599a2013b15592d17fe897126f549974351e4c3f`. The separate uncommitted image attachment worktree was not touched. Local summary and host recovery branches still contain unique commits, but origin main has overlapping newer behavior. Execution must reconcile behavior through tests rather than cherry-pick any branch wholesale.
 
@@ -461,7 +469,7 @@ Current source evidence shows a development-checkout installer. It requires Git,
 
 Current official Codex documentation says ChatGPT sign-in provides subscription access. It lists stdio as the default App Server transport and separates a stable API surface from capability-gated experimental fields. WebSocket is experimental and unsupported. `dynamicTools` is experimental. The pinned Codex CLI 0.151.0 also labels the app-server command experimental. GCR-1 must test stable-only fields, a research-only local MCP proxy, dynamic tools, and the current direct transport benchmark. A functionally passing experimental App Server path can support an alpha, not a stable claim. The direct path cannot ship because it reads and refreshes another client's credentials.
 
-Open questions that remain live evidence tasks are the native command path available to an average Grok user, arm64 Sand parity, access to one retained prior Grok version, the exact safe official tool bridge, and native Grok automation capability. GCR-1, GCR-3, and GCR-4 fail closed when those cannot be proved.
+The separate `bugfix/grokbot-local-image-attachments` worktree remains uncommitted and untouched by this program branch. Its supplied native image result supports the attachment boundary but cannot select a bridge or enter GCR-1 until it has a stable commit. Open questions that remain live evidence tasks are the native command path available to an average Grok user, arm64 Sand parity, access to one retained prior Grok version, the exact safe official tool bridge, and native Grok automation capability. GCR-1, GCR-3, and GCR-4 fail closed when those cannot be proved.
 
 ## Appendix B. Alternatives rejected
 
@@ -473,7 +481,8 @@ Open questions that remain live evidence tasks are the native command path avail
 - Merge the standalone `grokbot-shim` project into this repository. It lost because that project is a separate runtime experiment, not the installed router's release boundary.
 - Convert the repository into a monorepo. It lost because current module boundaries already separate runtime, control, patching, CLI, tests, and static UI.
 - Recommend a mutable `curl` command from `main` or `latest`. It lost because the user cannot know which bytes will execute. The primary command pins a release URL and installer digest.
-- Detach or rewrite the public fork. It lost because the fork already provides transparent lineage and the MIT license permits distribution with preserved notice.
+- Use the working fork as the final install source. It lost because the user requested a new standalone repository only after every production gate passes. The fork remains staging evidence and a lineage reference.
+- Squash the upstream project into unattributed source. It lost because the new repository must preserve upstream authorship, the MIT notice, and clear README and `NOTICE` credit.
 
 ## Appendix C. Risks
 
