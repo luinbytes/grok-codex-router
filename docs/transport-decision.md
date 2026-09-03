@@ -63,6 +63,8 @@ If no App Server candidate passes, the program stops. It does not fall back to t
 
 The native-image result reported for `bugfix/grokbot-local-image-attachments` is separate evidence. It cannot select an App Server bridge, and the uncommitted worktree must not be copied or merged. Reconcile it only after that fix has a stable commit.
 
+The authenticated and native lane procedure is prepared in [GCR-1 native validation](gcr1-native-validation.md). Its checked-in schema fixes the ten scenario identifiers, fail-closed result states, redacted evidence fields, and permanently blocked per-lane release verdict. Live receipts remain private and must use new output paths. Preparation is not execution: no authenticated provider turn or native Grok lane is claimed here.
+
 ## Authenticated local probe
 
 The repository now contains a bounded authenticated App Server probe for GCR-1. Its public CLI mode is `--authenticated-tool-roundtrip --model <model> --codex-home <absolute-private-directory>`, with optional `--output <new-path>`. Authenticated mode resolves `codex` through the sanitized child path and uses a fixed App Server argument vector.

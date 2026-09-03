@@ -1,0 +1,250 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/luinbytes/grok-codex-router/blob/main/artifacts/gcr-1/native-lane-receipt.schema.json",
+  "title": "GCR-1 native validation lane receipt",
+  "description": "Schema for private, redacted native Grok validation receipts. A conforming receipt is evidence for one lane, not release authorization.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "gcrId",
+    "headSha",
+    "laneNumber",
+    "scenario",
+    "laneClass",
+    "startedAt",
+    "completedAt",
+    "result",
+    "controlCapability",
+    "authentication",
+    "runtime",
+    "eventAudit",
+    "artifacts",
+    "releaseEligibility"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "gcrId": { "const": "GCR-1" },
+    "headSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "laneNumber": { "type": "integer", "minimum": 1, "maximum": 10 },
+    "scenario": {
+      "enum": [
+        "authentication-status",
+        "plain-text",
+        "one-tool",
+        "parallel-tools",
+        "stream-order",
+        "continuation",
+        "cancellation",
+        "malformed-tool-results",
+        "restart-behavior",
+        "model-and-tool-inventory"
+      ]
+    },
+    "laneClass": { "enum": ["authenticated-local", "native-grok", "native-grok-image"] },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "completedAt": { "type": "string", "format": "date-time" },
+    "result": { "enum": ["PASS", "BLOCK", "FAIL"] },
+    "blockReason": {
+      "enum": [
+        "control-capability-unavailable",
+        "authentication-required",
+        "sand-unavailable",
+        "containment-unproven",
+        "scenario-not-run"
+      ]
+    },
+    "controlCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "available"],
+      "properties": {
+        "kind": { "enum": ["native-grok-control", "browser-only", "separate-host", "none"] },
+        "available": { "type": "boolean" },
+        "reason": { "type": "string", "maxLength": 240 }
+      }
+    },
+    "authentication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "state", "credentialStore"],
+      "properties": {
+        "owner": { "const": "codex-cli" },
+        "state": { "enum": ["signed-out", "signed-in", "not-observed"] },
+        "credentialStore": { "enum": ["file", "not-observed"] }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "architecture", "codexCliVersion", "nativeGrokExecution", "sandExecution", "containment"],
+      "properties": {
+        "platform": { "enum": ["darwin", "linux", "windows"] },
+        "architecture": { "enum": ["arm64", "x86_64", "aarch64"] },
+        "codexCliVersion": { "type": "string", "maxLength": 80 },
+        "codexCliSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "nativeGrokExecution": { "enum": ["observed", "not-observed", "not-run"] },
+        "sandExecution": { "enum": ["observed", "not-observed", "not-run"] },
+        "containment": { "enum": ["process-tree", "process-group-only", "unproven"] }
+      }
+    },
+    "eventAudit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowedCount", "forbiddenCount", "unknownCount", "grokExecutedAllTools"],
+      "properties": {
+        "allowedCount": { "type": "integer", "minimum": 0 },
+        "forbiddenCount": { "type": "integer", "minimum": 0 },
+        "unknownCount": { "type": "integer", "minimum": 0 },
+        "grokExecutedAllTools": { "type": "boolean" }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "name", "sha256"],
+        "properties": {
+          "kind": { "enum": ["receipt", "screenshot", "event-audit", "probe-report"] },
+          "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "releaseEligibility": { "const": "blocked" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "result": { "const": "BLOCK" } }, "required": ["result"] },
+      "then": { "required": ["blockReason"] }
+    },
+    {
+      "if": { "properties": { "result": { "enum": ["PASS", "FAIL"] } }, "required": ["result"] },
+      "then": { "not": { "required": ["blockReason"] } }
+    },
+    {
+      "if": { "properties": { "result": { "const": "PASS" } }, "required": ["result"] },
+      "then": {
+        "properties": {
+          "controlCapability": {
+            "properties": {
+              "kind": { "const": "native-grok-control" },
+              "available": { "const": true }
+            }
+          },
+          "authentication": {
+            "properties": {
+              "state": { "const": "signed-in" },
+              "credentialStore": { "const": "file" }
+            }
+          },
+          "runtime": {
+            "properties": {
+              "nativeGrokExecution": { "const": "observed" },
+              "sandExecution": { "const": "observed" },
+              "containment": { "const": "process-tree" }
+            }
+          },
+          "eventAudit": {
+            "properties": {
+              "forbiddenCount": { "const": 0 },
+              "unknownCount": { "const": 0 },
+              "grokExecutedAllTools": { "const": true }
+            }
+          },
+          "artifacts": { "minItems": 1 }
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "laneNumber": { "const": 1 },
+            "scenario": { "const": "authentication-status" },
+            "artifacts": { "contains": { "properties": { "kind": { "const": "screenshot" }, "name": { "const": "bridge-auth-status.png" } }, "required": ["kind", "name"] } }
+          },
+          "required": ["laneNumber", "scenario"]
+        },
+        {
+          "properties": {
+            "laneNumber": { "const": 2 },
+            "scenario": { "const": "plain-text" },
+            "artifacts": {
+              "allOf": [
+                { "contains": { "properties": { "kind": { "const": "screenshot" }, "name": { "const": "bridge-plain-turn.png" } }, "required": ["kind", "name"] } },
+                { "contains": { "properties": { "kind": { "const": "screenshot" }, "name": { "const": "bridge-image-turn.png" } }, "required": ["kind", "name"] } }
+              ]
+            }
+          },
+          "required": ["laneNumber", "scenario"]
+        },
+        {
+          "properties": {
+            "laneNumber": { "const": 3 },
+            "scenario": { "const": "one-tool" },
+            "artifacts": { "contains": { "properties": { "kind": { "const": "screenshot" }, "name": { "const": "bridge-single-tool.png" } }, "required": ["kind", "name"] } }
+          },
+          "required": ["laneNumber", "scenario"]
+        },
+        {
+          "properties": {
+            "laneNumber": { "const": 4 },
+            "scenario": { "const": "parallel-tools" },
+            "artifacts": { "contains": { "properties": { "kind": { "const": "screenshot" }, "name": { "const": "bridge-parallel-tools.png" } }, "required": ["kind", "name"] } }
+          },
+          "required": ["laneNumber", "scenario"]
+        },
+        {
+          "properties": {
+            "laneNumber": { "const": 5 },
+            "scenario": { "const": "stream-order" },
+            "artifacts": { "contains": { "properties": { "kind": { "const": "screenshot" }, "name": { "const": "bridge-stream-order.png" } }, "required": ["kind", "name"] } }
+          },
+          "required": ["laneNumber", "scenario"]
+        },
+        {
+          "properties": {
+            "laneNumber": { "const": 6 },
+            "scenario": { "const": "continuation" },
+            "artifacts": { "contains": { "properties": { "kind": { "const": "screenshot" }, "name": { "const": "bridge-continuation.png" } }, "required": ["kind", "name"] } }
+          },
+          "required": ["laneNumber", "scenario"]
+        },
+        {
+          "properties": {
+            "laneNumber": { "const": 7 },
+            "scenario": { "const": "cancellation" },
+            "artifacts": { "contains": { "properties": { "kind": { "const": "screenshot" }, "name": { "const": "bridge-cancel.png" } }, "required": ["kind", "name"] } }
+          },
+          "required": ["laneNumber", "scenario"]
+        },
+        {
+          "properties": {
+            "laneNumber": { "const": 8 },
+            "scenario": { "const": "malformed-tool-results" },
+            "artifacts": { "contains": { "properties": { "kind": { "const": "screenshot" }, "name": { "const": "bridge-tool-error.png" } }, "required": ["kind", "name"] } }
+          },
+          "required": ["laneNumber", "scenario"]
+        },
+        {
+          "properties": {
+            "laneNumber": { "const": 9 },
+            "scenario": { "const": "restart-behavior" },
+            "artifacts": { "contains": { "properties": { "kind": { "const": "screenshot" }, "name": { "const": "bridge-restart.png" } }, "required": ["kind", "name"] } }
+          },
+          "required": ["laneNumber", "scenario"]
+        },
+        {
+          "properties": {
+            "laneNumber": { "const": 10 },
+            "scenario": { "const": "model-and-tool-inventory" },
+            "artifacts": { "contains": { "properties": { "kind": { "const": "screenshot" }, "name": { "const": "bridge-model-tools.png" } }, "required": ["kind", "name"] } }
+          },
+          "required": ["laneNumber", "scenario"]
+        }
+      ]
+    }
+  ]
+}
