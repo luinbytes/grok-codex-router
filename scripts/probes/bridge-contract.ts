@@ -77,7 +77,7 @@ export const MATCHED_CONTINUATION_IDENTITY = {
 } as const satisfies ContinuationIdentity;
 
 export type BridgeEvent =
-  | { readonly kind: "authentication"; readonly owner: AuthenticationOwner }
+  | { readonly kind: "authentication"; readonly owner: AuthenticationOwner; readonly status: "signed-in" | "signed-out" }
   | { readonly kind: "text-delta"; readonly characters: Count }
   | { readonly kind: "reasoning-delta"; readonly characters: Count }
   | { readonly kind: "tool-request"; readonly callId: CallId; readonly executor: ToolExecutor }
@@ -473,7 +473,9 @@ function forbiddenFault(action: ForbiddenAction): FaultCode {
 function isBridgeEvent(value: unknown): value is BridgeEvent {
   if (!isRecord(value) || typeof value.kind !== "string") return false;
   switch (value.kind) {
-    case "authentication": return hasOnlyKeys(value, ["kind", "owner"]) && (value.owner === "codex" || value.owner === "external");
+    case "authentication": return hasOnlyKeys(value, ["kind", "owner", "status"])
+      && (value.owner === "codex" || value.owner === "external")
+      && (value.status === "signed-in" || value.status === "signed-out");
     case "text-delta":
     case "reasoning-delta": return hasOnlyKeys(value, ["kind", "characters"]) && isCount(value.characters);
     case "tool-request": return hasOnlyKeys(value, ["kind", "callId", "executor"]) && isCallId(value.callId) && (value.executor === "grok" || value.executor === "codex" || value.executor === "candidate");

@@ -7,7 +7,7 @@ const MALFORMED = callId("direct-malformed");
 
 export const DIRECT_FIXTURES = {
   "authentication-status": [
-    { kind: "authentication", owner: "external" },
+    { kind: "authentication", owner: "external", status: "signed-in" },
     { kind: "completed" }
   ],
   "plain-text": [

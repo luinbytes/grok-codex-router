@@ -69,6 +69,12 @@ The App Server adapter accepts `unknown` JSON values. It recognizes only the JSO
 
 Any command, file, terminal, web, approval, built-in tool, unexpected MCP, or unknown server request becomes a bounded failure. Raw events never enter a report.
 
+The parser keeps JSON-RPC request IDs separate from Grok tool-call IDs. A parser-owned ledger reserves each call with its thread and turn before exposing a handoff, then rejects reused identities, cross-turn completion, or duplicate completion notifications. Tool arguments accept JSON objects only, with fixed byte, depth, and node ceilings. IDs, deltas, and protocol results are bounded before normalization. Each rejection carries a semantic failure event so the evaluator cannot drop it silently.
+
+Thread startup is a safety receipt, not a generic acknowledgement. The response must match the requested model, `never` approval policy, and a read-only sandbox with network disabled. Model discovery emits only a `model-available` lifecycle receipt. The live candidate must combine that receipt with its item audit before it emits the contract's Grok-only inventory event.
+
+The dynamic candidate supports flat Grok tool names only. A non-null dynamic namespace is unsupported and fails as unexpected MCP traffic. The current parser accepts already-parsed values; live stdio framing must enforce a raw-byte ceiling before `JSON.parse()` so an oversized line cannot bypass the in-memory limits.
+
 Live mode generates the installed Codex stable and experimental schema bundles in a temporary directory. It records the CLI version and bundle hashes, then confirms that `dynamicTools` exists only on the experimental `ThreadStartParams`. The adapter does not check in the full generated schema and adds no runtime validation package.
 
 ## Tradeoffs

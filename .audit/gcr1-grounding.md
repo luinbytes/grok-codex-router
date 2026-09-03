@@ -50,6 +50,12 @@ The user's report says that worktree passes 34 router tests and one native-pixel
 - WebSocket is experimental and unsupported.
 - Generated stable and experimental schemas differ at `ThreadStartParams`. Only the experimental schema accepts `dynamicTools`.
 - The generated v2 schema hashes are `2442b15801bc019ad55987ad03e0f0ae60c51417825b9b6d708db640e6c2651c` for stable and `a586cdc50f84c56c7654387e869b470a689796fa1c57678dcafb5921bb2d5255` for experimental.
+- An `item/tool/call` server request has two distinct identities: its JSON-RPC envelope `id` and its payload `callId`. The bridge must retain both without reporting either.
+- The schemas define no useful payload, nesting, or resource ceiling. The parser supplies conservative limits and rejects unknown, privileged, oversized, cyclic, accessor-backed, or prototype-bearing input before a live adapter sees it.
+- A parser-owned identity ledger binds each Grok call ID to its thread and turn. Reused request IDs, reused call IDs, cross-turn completion, and duplicate completion notifications fail before a second handoff or completion can escape.
+- A thread-start response is accepted only for the requested model, `never` approval policy, and a read-only sandbox with network disabled. This limits the probe but does not replace live proof that no built-in tool executed.
+- The dynamic candidate deliberately accepts flat tool names only. Namespaced dynamic tools fail closed. Live stdio code must cap raw line bytes before JSON parsing; the value parser cannot bound memory that was already allocated by an upstream decoder.
+- Schema presence cannot prove runtime support, authentication ownership, Grok-owned execution, cancellation, restart, privacy, or native image safety. Those remain live evidence gates.
 
 ## Architect inputs
 

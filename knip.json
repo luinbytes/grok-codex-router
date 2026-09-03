@@ -5,6 +5,7 @@
     "control/server.ts",
     "control/telemetry-check.ts",
     "scripts/*.ts",
+    "scripts/probes/codex-bridge-probe.ts",
     "tests/**/*.test.ts",
     "ui/app.mjs"
   ],

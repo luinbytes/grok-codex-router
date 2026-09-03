@@ -51,7 +51,7 @@ test("missing deltas, duplicate IDs, reordered results, dropped cancellation, in
   ]).status, "failed");
 
   assert.equal(resultFor("authentication-status", [
-    { kind: "authentication", owner: "external" },
+    { kind: "authentication", owner: "external", status: "signed-in" },
     { kind: "tool-request", callId: callId("unexpected-tool"), executor: "grok" },
     { kind: "completed" }
   ]).status, "failed");
