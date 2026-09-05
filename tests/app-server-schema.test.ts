@@ -117,7 +117,7 @@ test("installed schema probe rejects invalid options without exposing their valu
 });
 
 test("installed schema probe terminates descendants of a timed-out wrapper", { skip: process.platform === "win32" }, async () => {
-  const directory = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "gcr-schema-process-test-"));
+  const directory = fs.mkdtempSync(path.join(fs.realpathSync(process.cwd()), ".gcr-schema-process-test-"));
   const executable = path.join(directory, "codex");
   const pidFile = path.join(directory, "descendant.pid");
   const wrapper = `#!${process.execPath}
@@ -142,7 +142,7 @@ setInterval(() => {}, 1000);
 });
 
 test("installed schema probe proves successful schema child groups are closed", { skip: process.platform === "win32" }, async () => {
-  const directory = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "gcr-schema-success-test-"));
+  const directory = fs.mkdtempSync(path.join(fs.realpathSync(process.cwd()), ".gcr-schema-success-test-"));
   const executable = path.join(directory, "codex");
   const pidFile = path.join(directory, "descendants.pid");
   const wrapper = `#!${process.execPath}
