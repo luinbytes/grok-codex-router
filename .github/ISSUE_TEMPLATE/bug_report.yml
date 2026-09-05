@@ -1,0 +1,20 @@
+name: Bug report
+description: Report an installation, routing, or recovery failure.
+body:
+  - type: markdown
+    attributes:
+      value: Do not attach credentials, account identifiers, prompts, images, tool arguments, or proprietary Sand bundles. Report security issues using SECURITY.md.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Versions and environment
+      description: Router commit, Grok Bot version, VM architecture, Node, Bun, and Codex CLI versions. Omit personal paths.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps and observed behavior
+      description: Include expected behavior and a redacted error. State whether the existing Grok Bot installation still works.
+    validations:
+      required: true

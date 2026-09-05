@@ -1,7 +1,8 @@
 {
   "name": "@howaboua/grok-codex-router",
   "version": "0.1.0",
-  "description": "First-party Codex Responses transport and per-agent model router for Grok Bot",
+  "description": "Experimental Codex inference bridge and per-agent router for Grok Bot",
+  "private": true,
   "type": "commonjs",
   "main": "dist/src/session.js",
   "bin": {
@@ -9,14 +10,19 @@
   },
   "files": [
     ".agents/skills/grok-codex-router/",
+    "scripts/install-preflight.cjs",
+    "install.sh",
+    "docs/",
     "dist/",
     "ui/"
   ],
   "scripts": {
-    "build": "rm -rf dist && bun node_modules/typescript/bin/tsc -p tsconfig.json && chmod +x dist/bin/grok-codex-router.js dist/scripts/*.js",
+    "build": "node scripts/build.cjs",
+    "check:portable": "npm run knip && npm run build && node scripts/test.cjs portable",
+    "check:vm": "node scripts/test.cjs vm",
     "check": "bun run knip && bun run build && node --test dist/tests/*.test.js && bun dist/control/telemetry-check.js",
     "knip": "node node_modules/knip/bin/knip.js",
-    "test": "node --test dist/tests/*.test.js",
+    "test": "node scripts/test.cjs all",
     "test:transport-contract": "bun run build && node --test dist/tests/transport-contract.test.js dist/tests/app-server-candidate.test.js dist/tests/app-server-schema.test.js dist/tests/app-server-stdio.test.js dist/tests/app-server-authenticated.test.js dist/tests/codex-process.test.js dist/tests/probe-cli.test.js",
     "probe:bridges": "bun run build && node dist/scripts/probes/codex-bridge-probe.js"
   },
@@ -34,12 +40,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/IgorWarzocha/grok-codex-router.git"
+    "url": "https://github.com/luinbytes/grok-codex-router.git"
   },
   "bugs": {
-    "url": "https://github.com/IgorWarzocha/grok-codex-router/issues"
+    "url": "https://github.com/luinbytes/grok-codex-router/issues"
   },
-  "homepage": "https://github.com/IgorWarzocha/grok-codex-router#readme",
+  "homepage": "https://github.com/luinbytes/grok-codex-router#readme",
   "publishConfig": {
     "access": "public"
   },
