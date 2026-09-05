@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { convertMessages } from "../src/message-wire.js";
 import { reportContextWindow, ResponseAccumulator } from "../src/response.js";
+import { unwrapSandValuePreservingBinary } from "../src/sand-values.js";
 import { convertTools } from "../src/tool-wire.js";
 import { buildRequest } from "../src/wire.js";
 
@@ -82,6 +87,99 @@ test("Grok image payloads become valid Codex data URLs without forwarding local 
       { type: "input_image", detail: "auto", image_url: "data:image/png;base64,aGVsbG8=" },
       { type: "input_text", text: "image content omitted because its source is not available to Codex" }
     ]
+  }]);
+});
+
+test("native Grok image bytes survive Sand value unwrapping", () => {
+  const image = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  const imagePin = {
+    type: "image",
+    image,
+    mimeType: "image/png",
+    toJSON: () => ({ type: "image", image: "[redacted]", mimeType: "image/png" })
+  };
+  const converted = convertMessages([{
+    role: "user",
+    content: [
+      imagePin,
+      { type: "image", image: new Uint8Array([1, 2, 3]), mimeType: "image/png" }
+    ]
+  }]);
+
+  assert.deepEqual(converted.input, [{
+    role: "user",
+    content: [{
+      type: "input_image",
+      detail: "auto",
+      image_url: `data:image/png;base64,${Buffer.from(image).toString("base64")}`
+    }, {
+      type: "input_text",
+      text: "image content omitted because its source is not available to Codex"
+    }]
+  }]);
+});
+
+test("non-image Sand wrappers retain their privacy-redacted JSON shape", () => {
+  const filePin = {
+    type: "file",
+    data: new Uint8Array([1, 2, 3]),
+    toJSON: () => ({ type: "file", data: "[redacted]" })
+  };
+
+  assert.deepEqual(unwrapSandValuePreservingBinary(filePin), {
+    type: "file",
+    data: "[redacted]"
+  });
+});
+
+test("current-agent attachment images become data URLs without allowing other local files", (t) => {
+  const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "grok-router-images-"));
+  t.after(() => fs.rmSync(dataRoot, { recursive: true, force: true }));
+  const attachmentRoot = path.join(dataRoot, "agents", "agent-a", "attachments");
+  fs.mkdirSync(attachmentRoot, { recursive: true });
+  const image = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  const allowed = path.join(attachmentRoot, "attached.png");
+  const denied = path.join(dataRoot, "unrelated.png");
+  fs.writeFileSync(allowed, image);
+  fs.writeFileSync(denied, image);
+
+  const converted = convertMessages([{
+    role: "user",
+    content: [
+      { type: "attachment", url: pathToFileURL(allowed).href },
+      { type: "image_url", url: denied }
+    ]
+  }], { agentId: "agent-a", dataRoot });
+
+  assert.deepEqual(converted.input, [{
+    role: "user",
+    content: [
+      { type: "input_image", detail: "auto", image_url: `data:image/png;base64,${image.toString("base64")}` },
+      { type: "input_text", text: "image content omitted because its source is not available to Codex" }
+    ]
+  }]);
+});
+
+test("local image attachments fail closed when the attachment root is symlinked", (t) => {
+  const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "grok-router-symlink-"));
+  t.after(() => fs.rmSync(dataRoot, { recursive: true, force: true }));
+  const external = path.join(dataRoot, "external");
+  const agentRoot = path.join(dataRoot, "agents", "agent-a");
+  fs.mkdirSync(external, { recursive: true });
+  fs.mkdirSync(agentRoot, { recursive: true });
+  const image = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  const candidate = path.join(external, "attached.png");
+  fs.writeFileSync(candidate, image);
+  fs.symlinkSync(external, path.join(agentRoot, "attachments"));
+
+  const converted = convertMessages([{
+    role: "user",
+    content: [{ type: "attachment", url: pathToFileURL(candidate).href }]
+  }], { agentId: "agent-a", dataRoot });
+
+  assert.deepEqual(converted.input, [{
+    role: "user",
+    content: [{ type: "input_text", text: "image content omitted because its source is not available to Codex" }]
   }]);
 });
 

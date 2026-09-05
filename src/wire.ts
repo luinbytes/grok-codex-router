@@ -18,7 +18,7 @@ function promptCacheKey(sessionId: string): string {
 }
 
 export function buildRequest(messages: unknown, tools: unknown, route: ResolvedRoute, sessionId: string): ResponsesBody {
-  const converted = convertMessages(messages);
+  const converted = convertMessages(messages, { agentId: route.agentId });
   const body: ResponsesBody = {
     model: route.model,
     store: false,

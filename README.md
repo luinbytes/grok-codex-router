@@ -59,6 +59,8 @@ Settings gives Sol, Luna, and Terra independent effective context windows of 272
 
 A dead connection is replaced when the next request needs it. The router does not expire sockets, continuation state, or OpenAI prompt caching by age.
 
+The stream inactivity timeout is three minutes. Incoming stream activity resets the timer, so a response can run longer while it continues producing events. A timeout discards the WebSocket and its continuation before the existing retry policy runs.
+
 Every request keeps a stable prompt-cache identity for its agent workload. Provider-reported cache reads and token use appear in Stats. Codex turn state is retained through native tool calls and transport retries.
 
 ## Verify the VM
