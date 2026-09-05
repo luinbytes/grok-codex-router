@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "mode": "schemas-only",
+  "provenance": {
+    "format": "gcr-probe-build/v1",
+    "routerVersion": "0.1.0",
+    "probeBuildSha256": "0465b736fd2d6234995c68113ecbdb59713f2df853434b9ab93bfcdf720511a4"
+  },
+  "reports": [
+    {
+      "candidate": "direct",
+      "evidence": "fixture",
+      "protocol": "direct-fixture",
+      "authenticationOwner": "external",
+      "scenarios": [
+        {
+          "scenario": "authentication-status",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 2
+        },
+        {
+          "scenario": "plain-text",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 2
+        },
+        {
+          "scenario": "one-tool",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 3
+        },
+        {
+          "scenario": "parallel-tools",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 5
+        },
+        {
+          "scenario": "stream-order",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 3
+        },
+        {
+          "scenario": "continuation",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 2
+        },
+        {
+          "scenario": "cancellation",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 3
+        },
+        {
+          "scenario": "malformed-tool-results",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 3
+        },
+        {
+          "scenario": "restart-behavior",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 3
+        },
+        {
+          "scenario": "model-and-tool-inventory",
+          "status": "passed",
+          "faultCodes": [],
+          "eventCount": 2
+        }
+      ],
+      "releaseEligibility": "baseline-only"
+    }
+  ],
+  "decision": {
+    "BASELINE_BRIDGE": "direct",
+    "SELECTED_BRIDGE": "none",
+    "STABLE_RELEASE": "blocked",
+    "ALPHA_RELEASE": "blocked",
+    "RELEASE_GATE": "BLOCKED"
+  },
+  "schema": {
+    "protocolVersion": "v2",
+    "cliVersion": "0.153.4",
+    "inspectionMode": "pinned",
+    "stableBundleSha256": "d3eace08be5dca386bfd1f1e8df650058b4113f1e10870a284d775d75517576a",
+    "experimentalBundleSha256": "e5f798fd1343c539f01fedea0e8a84a43c080fcca4615c80eb04a5edab4f7d0a",
+    "stableDynamicTools": false,
+    "experimentalDynamicTools": true,
+    "releaseEligibility": "blocked",
+    "codexCliSha256": "88ecd2cbf8044832a49e7710394d9d328f7205fa5e8c8ebbdd015e002b4f6e21",
+    "executableProvenance": "unverified",
+    "processContainment": "same-process-group-only"
+  }
+}

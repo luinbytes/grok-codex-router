@@ -148,6 +148,10 @@ function runManualAction(name: string, operation: () => Promise<void>): void {
   });
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 async function api(request: http.IncomingMessage, response: http.ServerResponse, pathname: string): Promise<boolean> {
   if (!pathname.startsWith("/api/")) return false;
   if (!authorized(request)) {
@@ -168,6 +172,19 @@ async function api(request: http.IncomingMessage, response: http.ServerResponse,
     if (next.authStore !== current.authStore) credentialStatus(next.authStore);
     writeConfig(next);
     json(response, 200, { ok: true, config: next });
+    return true;
+  }
+  if (request.method === "POST" && pathname === "/api/router") {
+    const body = await requestBody(request);
+    if (!isRecord(body) || typeof body["enabled"] !== "boolean") {
+      json(response, 400, { error: "enabled must be a boolean" });
+      return true;
+    }
+    const config = loadConfig();
+    if (body["enabled"]) credentialStatus(config.authStore);
+    config.enabled = body["enabled"];
+    writeConfig(config);
+    json(response, 200, { ok: true, enabled: config.enabled });
     return true;
   }
   if (request.method === "POST" && pathname === "/api/recover") {

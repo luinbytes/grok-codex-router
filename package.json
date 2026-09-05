@@ -16,7 +16,9 @@
     "build": "rm -rf dist && bun node_modules/typescript/bin/tsc -p tsconfig.json && chmod +x dist/bin/grok-codex-router.js dist/scripts/*.js",
     "check": "bun run knip && bun run build && node --test dist/tests/*.test.js && bun dist/control/telemetry-check.js",
     "knip": "node node_modules/knip/bin/knip.js",
-    "test": "node --test dist/tests/*.test.js"
+    "test": "node --test dist/tests/*.test.js",
+    "test:transport-contract": "bun run build && node --test dist/tests/transport-contract.test.js dist/tests/app-server-candidate.test.js dist/tests/app-server-schema.test.js dist/tests/app-server-stdio.test.js dist/tests/app-server-authenticated.test.js dist/tests/codex-process.test.js dist/tests/probe-cli.test.js",
+    "probe:bridges": "bun run build && node dist/scripts/probes/codex-bridge-probe.js"
   },
   "dependencies": {
     "ws": "8.21.3"
