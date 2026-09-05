@@ -5,7 +5,7 @@ import path from "node:path";
 export type ReasoningEffort = "off" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 const CONTEXT_WINDOW_OPTIONS = [272_000, 472_000, 872_000] as const;
 export type ContextWindowTokens = typeof CONTEXT_WINDOW_OPTIONS[number];
-export const ROUTER_MODELS = ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"] as const;
+export const ROUTER_MODELS = ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"] as const;
 export type RouterModel = typeof ROUTER_MODELS[number];
 type TransportMode = "cached-websocket" | "websocket" | "sse";
 type WorkloadClass = "agent" | "summarization" | "subagent" | "browser" | "computer" | "automation" | "group";
@@ -49,6 +49,7 @@ export const DEFAULT_CONFIG = Object.freeze<RouterConfig>({
   version: 1,
   authStore: "pi",
   contextWindows: {
+    "gpt-6-astra": 272_000,
     "gpt-5.6-sol": 272_000,
     "gpt-5.6-luna": 272_000,
     "gpt-5.6-terra": 272_000

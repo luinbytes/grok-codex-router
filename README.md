@@ -45,9 +45,9 @@ The UI is the normal management surface.
 
 Agent settings are stored against immutable profile IDs. Renaming an agent does not break its route. Agents speaking inside a chat room use the separate **Group turns** setting.
 
-The UI offers GPT-5.6 Sol, Luna, and Terra. An agent can inherit the complete default route or override both model and reasoning effort.
+The UI offers GPT-6 Astra plus GPT-5.6 Sol, Luna, and Terra. An agent can inherit the complete default route or override both model and reasoning effort.
 
-Settings gives Sol, Luna, and Terra independent effective context windows of 272k, 472k, or 872k tokens. The router reports the selected model's window to Grok Bot so native compaction uses the same budget. It does not send an unsupported context-limit field to Codex. Each model defaults to 272k.
+Settings gives Astra, Sol, Luna, and Terra independent effective context windows of 272k, 472k, or 872k tokens. The router reports the selected model's window to Grok Bot so native compaction uses the same budget. It does not send an unsupported context-limit field to Codex. Each model defaults to 272k.
 
 ## Choose a transport
 

@@ -101,7 +101,7 @@ function routerModel(value: string | undefined): RouterModel {
   const model = ROUTER_MODELS.find((candidate) =>
     candidate === normalized || candidate.endsWith("-" + normalized)
   );
-  if (!model) throw new Error("model must be sol, luna, or terra");
+  if (!model) throw new Error("model must be astra, sol, luna, or terra");
   return model;
 }
 
@@ -196,7 +196,7 @@ function status(): void {
   console.log(
     "context windows\t" +
     ROUTER_MODELS.map((model) =>
-      model.slice("gpt-5.6-".length) + "=" + config.contextWindows[model] / 1_000 + "k"
+      model.split("-").at(-1) + "=" + config.contextWindows[model] / 1_000 + "k"
     ).join("\t")
   );
   printRoutes();
@@ -217,7 +217,7 @@ function help(): void {
     "  agents",
     "  routes",
     "  auth-store pi|codex",
-    "  context-window sol|luna|terra 272k|472k|872k",
+    "  context-window astra|sol|luna|terra 272k|472k|872k",
     "  default MODEL EFFORT",
     "  route AGENT MODEL EFFORT",
     "  class CLASS MODEL EFFORT",

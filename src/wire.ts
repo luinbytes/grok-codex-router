@@ -35,7 +35,9 @@ export function buildRequest(messages: unknown, tools: unknown, route: ResolvedR
   const convertedTools = convertTools(tools);
   if (convertedTools) body.tools = convertedTools;
   if (route.reasoningEffort !== "off") {
-    const effort = /^gpt-5\.(?:[2-9]|\d{2,})/.test(route.model) && route.reasoningEffort === "minimal"
+    const effort = route.model === "gpt-6-astra" && ["none", "minimal"].includes(route.reasoningEffort)
+      ? "low"
+      : /^gpt-5\.(?:[2-9]|\d{2,})/.test(route.model) && route.reasoningEffort === "minimal"
       ? "low"
       : route.reasoningEffort;
     body.reasoning = { effort, summary: "auto" };

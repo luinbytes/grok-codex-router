@@ -89,7 +89,7 @@ export function issueReport(): string {
     "- Sand supervisor: " + supervisor,
     "- OAuth store health: " + auth,
     "- Context windows: " + ROUTER_MODELS.map((model) =>
-      model.slice("gpt-5.6-".length) + "=" + config.contextWindows[model] / 1_000 + "k"
+      model.split("-").at(-1) + "=" + config.contextWindows[model] / 1_000 + "k"
     ).join(", "),
     "- Node: " + process.version,
     "- Bun: " + commandVersion("/usr/local/bin/bun", ["--version"]),

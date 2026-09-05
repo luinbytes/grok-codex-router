@@ -59,11 +59,13 @@ test("each model owns one supported effective context budget", () => {
   const config = validateConfig({
     ...structuredClone(DEFAULT_CONFIG),
     contextWindows: {
+      "gpt-6-astra": 272_000,
       "gpt-5.6-sol": 272_000,
       "gpt-5.6-luna": 472_000,
       "gpt-5.6-terra": 872_000
     }
   });
+  assert.equal(contextWindowForModel(config, "gpt-6-astra"), 272_000);
   assert.equal(contextWindowForModel(config, "gpt-5.6-sol"), 272_000);
   assert.equal(contextWindowForModel(config, "gpt-5.6-luna"), 472_000);
   assert.equal(contextWindowForModel(config, "gpt-5.6-terra"), 872_000);
@@ -71,5 +73,5 @@ test("each model owns one supported effective context budget", () => {
 
   const { contextWindows: _omitted, ...priorConfig } = structuredClone(DEFAULT_CONFIG);
   const converted = validateConfig({ ...priorConfig, contextWindowTokens: 472_000 });
-  assert.deepEqual(Object.values(converted.contextWindows), [472_000, 472_000, 472_000]);
+  assert.deepEqual(Object.values(converted.contextWindows), [472_000, 472_000, 472_000, 472_000]);
 });

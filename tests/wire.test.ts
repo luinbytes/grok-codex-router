@@ -222,6 +222,18 @@ test("GPT-5.6 reasoning uses the Codex effort contract", () => {
   assert.deepEqual(request("minimal")["reasoning"], { effort: "low", summary: "auto" });
 });
 
+test("GPT-6 Astra maps unsupported low-end reasoning efforts to low", () => {
+  for (const reasoningEffort of ["none", "minimal"] as const) {
+    const body = buildRequest(
+      [],
+      [],
+      { model: "gpt-6-astra", reasoningEffort, workload: "agent", agentId: "agent-a" },
+      "session-a"
+    );
+    assert.deepEqual(body.reasoning, { effort: "low", summary: "auto" });
+  }
+});
+
 test("Responses events preserve tool identity and provider cache usage", () => {
   const accumulator = new ResponseAccumulator();
   const parts: Array<Record<string, unknown> & { type: string }> = [];
