@@ -279,6 +279,10 @@ async function main(): Promise<void> {
     console.log(issueReport());
   }
   else if (command === "install" || command === "recover") {
+    const preflight = spawnSync(process.execPath, [path.resolve(__dirname, "..", "..", "scripts", "install-preflight.cjs")], {
+      stdio: "inherit"
+    });
+    if (preflight.error || preflight.status !== 0) process.exit(preflight.status ?? 1);
     initialize();
     await ensureAuthenticatedStore();
     runBuiltScript("patch-host");

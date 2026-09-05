@@ -39,7 +39,7 @@ The top-level fields are:
 | `classes` | Workload class to route map | `gpt-5.6-sol`, `high` for each class |
 | `transport` | Transport mode and retry count | `cached-websocket`, `5` |
 
-The accepted router models are `gpt-5.6-sol`, `gpt-5.6-luna`, and `gpt-5.6-terra`.
+The built-in model aliases and per-model context settings cover `gpt-5.6-sol`, `gpt-5.6-luna`, and `gpt-5.6-terra`. Route validation accepts other non-empty model IDs; that does not prove provider availability or compatibility.
 
 The accepted reasoning efforts are `off`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`.
 
@@ -111,7 +111,7 @@ grok-codex-router diagnose
 | `SAND_CODEX_ROUTER_CONFIG` | Exact router configuration path | `$SAND_DATA_ROOT/grok-codex-router.json` |
 | `SAND_DATA_ROOT` | Router state, agent data, telemetry, and recovery root | `~/sand-data` |
 | `SAND_CODEX_ROUTER_PORT` | Local control service port | `21371` |
-| `SAND_CODEX_ROUTER_HOME` | Installed router package root | The installed package root |
+| `SAND_CODEX_ROUTER_HOME` | Installed router package root | Package-relative internally; `~/grok-codex-router` in injected hooks |
 | `SAND_HOST_DIR` | Sand host directory | `~/sand-host` |
 | `SAND_CODEX_ROUTER_BUN` | Bun executable used by the control supervisor | `/usr/local/bin/bun` |
 | `SAND_CODEX_ROUTER_SERVICE_LOG` | Control supervisor log path | `/tmp/grok-codex-router-service.log` |

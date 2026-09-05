@@ -1,5 +1,7 @@
 - Treat `src/`, `control/`, `scripts/`, `bin/`, and `ui/` as canonical. Never patch `dist/`, `node_modules/`, or the installed Sand bundle by hand.
-- Load applicable OAuth, prompt-caching, interface, review, and dependency guidance before changing a matching boundary.
+- Start installation and recovery work with `node scripts/install-preflight.cjs --json`. A blocked, missing, or malformed result forbids public activation; do not bypass it with legacy CLI or control APIs.
+- Read the self-contained `.agents/skills/grok-codex-router/SKILL.md` and the relevant guides under `docs/`. Personal skills are optional, not repository prerequisites.
 - Never log credentials, prompts, message bodies, tool arguments, authorization headers, or OAuth callback material.
-- Verify changed wire contracts with `bun run check`, then a direct tool round-trip and one native Grok Bot turn.
+- Run `npm run check:portable` in an isolated development checkout. Never build in the checkout loaded by a running host. Native VM checks and provider turns require an explicitly scoped test environment; fixture success is not native release evidence.
+- Keep `docs/release-readiness.md` and issue #2 current. No supported public installer, managed Codex updater, or rollback implementation ships until their acceptance criteria are met.
 - Keep `.agents/skills/grok-codex-router/` aligned with installation, automatic recovery, issue reporting, and verification behavior.
