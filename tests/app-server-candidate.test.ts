@@ -27,7 +27,7 @@ const candidate: AppServerCandidate = "app-server-dynamic";
 const context: AppServerCandidateContext = {
   candidate,
   expectedCwd: "/synthetic/workspace",
-  expectedCliVersion: "0.151.0",
+  expectedCliVersion: "0.153.4",
   expectedModel: "gpt-synthetic",
   activeThreadId: "thread-synthetic",
   activeTurnId: "turn-synthetic",
@@ -126,7 +126,7 @@ function validThreadResult(turns: readonly unknown[] = []): Record<string, unkno
     runtimeWorkspaceRoots: [],
     sandbox: { networkAccess: false, type: "readOnly" },
     thread: {
-      cliVersion: "0.151.0",
+      cliVersion: "0.153.4",
       createdAt: 1,
       cwd: "/synthetic/workspace",
       ephemeral: true,
@@ -261,6 +261,24 @@ test("validates each correlated response and exposes only semantic results", () 
   assert.deepEqual(parseAppServerMessage(notification("thread/started", {
     thread: validThreadResult().thread
   }), { ...context, activeThreadId: "thread-server-generated" }), { kind: "accepted" });
+  assert.deepEqual(parseAppServerMessage(notification("thread/status/changed", {
+    threadId: "thread-server-generated",
+    status: { activeFlags: [], type: "active" }
+  }), { ...context, activeThreadId: "thread-server-generated", activeTurnId: "turn-server-generated" }), { kind: "accepted" });
+  assert.deepEqual(parseAppServerMessage(notification("thread/status/changed", {
+    threadId: "thread-server-generated",
+    status: { activeFlags: ["waitingOnApproval"], type: "active" }
+  }), { ...context, activeThreadId: "thread-server-generated", activeTurnId: "turn-server-generated" }), expectedRejection("forbidden-built-in"));
+  const { activeTurnId: ignoredTurnId, ...idleContext } = context;
+  void ignoredTurnId;
+  assert.deepEqual(parseAppServerMessage(notification("thread/status/changed", {
+    threadId: "thread-server-generated",
+    status: { type: "idle" }
+  }), { ...idleContext, activeThreadId: "thread-server-generated" }), { kind: "accepted" });
+  assert.deepEqual(parseAppServerMessage(notification("thread/status/changed", {
+    threadId: "thread-server-generated",
+    status: { type: "idle" }
+  }), { ...context, activeThreadId: "thread-server-generated", activeTurnId: "turn-server-generated" }), { kind: "accepted" });
   assert.deepEqual(parseAppServerMessage({ emittedAtMs: 1, method: "remoteControl/status/changed", params: {
     environmentId: null,
     installationId: "installation-synthetic",

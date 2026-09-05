@@ -1,5 +1,7 @@
 # GCR-1 architecture
 
+> Historical design snapshot created against Codex CLI 0.151.0. See `docs/transport-decision.md` for current runtime evidence.
+
 ## Synthesis decision
 
 Candidate A is the base. It scored 26.5 of 30 in the independent review. Its semantic `BridgeSession` boundary, branded tool-call identity, and explicit authentication owner preserve the rules that matter.

@@ -1,5 +1,7 @@
 # GCR-1 authenticated probe design
 
+> Historical design snapshot from Codex CLI 0.151.0. See `docs/transport-decision.md` for the implemented 0.153.4 probe boundary and remaining blockers.
+
 ## Decision
 
 The authenticated App Server probe is one fixed, deep operation. It uses a dedicated Codex home that the user authenticated through the official Codex CLI, proves one dynamic-tool request and result, closes its owned process group, and returns a fixed safe receipt. It checks credential-file ownership and permissions without opening the file. It does not read, copy, parse, hash, or report credential bytes or authentication values.

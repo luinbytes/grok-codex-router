@@ -1,5 +1,7 @@
 # GCR1 boundary synthesis
 
+> Historical snapshot from Codex CLI 0.151.0. See `docs/transport-decision.md` for the current compatibility evidence and release decision.
+
 ## Decision
 
 Candidate B is the target architecture: one diagnostic operation owns home admission, executable proof, App Server ordering, process cleanup, and safe evidence projection. Candidate A contributes the finite error model, mandatory signed-out prerequisite, independent version proof, descriptor-oriented validation, and allowlisted artifact provenance.

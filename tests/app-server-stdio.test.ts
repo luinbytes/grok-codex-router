@@ -31,7 +31,7 @@ let turnId = "turn-server-generated";
 function send(value) { process.stdout.write(JSON.stringify(value) + "\n"); }
 function thread(cwd) {
   return {
-    cliVersion: "0.151.0",
+    cliVersion: "0.153.4",
     createdAt: 1,
     cwd,
     ephemeral: true,
@@ -96,8 +96,9 @@ lines.on("line", (line) => {
   if (message.method === "turn/start") {
     const response = { id: message.id, result: { turn: { id: turnId, items: [], status: "inProgress" } } };
     const notification = { method: "turn/started", params: { threadId, turn: { id: turnId, items: [], status: "inProgress" } } };
-    if (notificationsFirst) { send(notification); send(response); }
-    else { send(response); send(notification); }
+    const active = { method: "thread/status/changed", params: { threadId, status: { activeFlags: [], type: "active" } } };
+    if (notificationsFirst) { send(active); send(notification); send(response); }
+    else { send(response); send(active); send(notification); }
     const item = { arguments: {}, id: "call-server-generated", namespace: null, status: "inProgress", success: null, tool: "gcr_probe_echo", type: "dynamicToolCall" };
     send({ method: "item/started", params: { item, startedAtMs: 1, threadId, turnId } });
     send({ id: "request-server-generated", method: "item/tool/call", params: { arguments: {}, callId: item.id, namespace: null, threadId, tool: item.tool, turnId } });
@@ -143,7 +144,7 @@ async function createFakeCodex(root: string, server: string, mode: string): Prom
     `const argsPath = ${JSON.stringify(argsPath)};`,
     `const mode = ${JSON.stringify(mode)};`,
     `const serverPath = ${JSON.stringify(serverPath)};`,
-    "if (actual.length === 1 && actual[0] === '--version') { process.stdout.write('codex-cli 0.151.0\\n'); process.exit(0); }",
+    "if (actual.length === 1 && actual[0] === '--version') { process.stdout.write('codex-cli 0.153.4\\n'); process.exit(0); }",
     "fs.writeFileSync(argsPath, JSON.stringify(actual));",
     "if (JSON.stringify(actual) !== JSON.stringify(expected)) { process.stderr.write('unexpected app-server arguments\\n'); process.exit(42); }",
     "process.argv[1] = mode;",
@@ -172,7 +173,7 @@ function options(fixture: FakeCodexFixture): AppServerStdioClientOptions {
     clientVersion: "0.1.0-test",
     codexHome: fixture.codexHome,
     cwd: fixture.cwd,
-    expectedCliVersion: "0.151.0",
+    expectedCliVersion: "0.153.4",
     expectedModel: "gpt-synthetic",
     requestTimeoutMs: 2_000,
     shutdownTimeoutMs: 100,
@@ -276,7 +277,7 @@ test("stdio client completes the safe lifecycle and closes without exposing priv
   await withTemporaryDirectory(async (directory, fixture) => {
     const receipt = await probeIsolatedAppServerLifecycle({
       clientVersion: "0.1.0-test",
-      expectedCliVersion: "0.151.0",
+      expectedCliVersion: "0.153.4",
       expectedModel: "gpt-synthetic",
       tools: [{
         name: "gcr_probe_echo",
@@ -286,11 +287,13 @@ test("stdio client completes the safe lifecycle and closes without exposing priv
     });
     assert.deepEqual(receipt, {
       candidate: "app-server-dynamic",
-      codexCliVersion: "0.151.0",
+      codexCliVersion: "0.153.4",
       codexCliSha256: fixture.executable.sha256,
+      executableProvenance: "unverified",
       protocol: "stdio-jsonl",
       authenticationOwner: "codex",
       authenticationStatus: "signed-out",
+      systemSkillsDigest: null,
       credentialStore: "effective-file",
       modelStatus: "available",
       mcpIsolation: "disabled-before-turn",
@@ -518,7 +521,7 @@ test("isolated lifecycle rejects MCP traffic emitted after thread startup", asyn
   await withTemporaryDirectory(async () => {
     await assert.rejects(() => probeIsolatedAppServerLifecycle({
       clientVersion: "0.1.0-test",
-      expectedCliVersion: "0.151.0",
+      expectedCliVersion: "0.153.4",
       expectedModel: "gpt-synthetic",
       requestTimeoutMs: 1_000,
       shutdownTimeoutMs: 100,
@@ -535,7 +538,7 @@ test("isolated lifecycle requires the effective file credential store", async ()
   await withTemporaryDirectory(async () => {
     await assert.rejects(() => probeIsolatedAppServerLifecycle({
       clientVersion: "0.1.0-test",
-      expectedCliVersion: "0.151.0",
+      expectedCliVersion: "0.153.4",
       expectedModel: "gpt-synthetic",
       requestTimeoutMs: 1_000,
       shutdownTimeoutMs: 100,
@@ -552,7 +555,7 @@ test("isolated lifecycle rejects a signed-in account before any provider turn", 
   await withTemporaryDirectory(async () => {
     await assert.rejects(() => probeIsolatedAppServerLifecycle({
       clientVersion: "0.1.0-test",
-      expectedCliVersion: "0.151.0",
+      expectedCliVersion: "0.153.4",
       expectedModel: "gpt-synthetic",
       requestTimeoutMs: 1_000,
       shutdownTimeoutMs: 100,

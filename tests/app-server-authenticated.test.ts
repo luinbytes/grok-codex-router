@@ -5,8 +5,13 @@ import path from "node:path";
 import test from "node:test";
 import {
   probeAuthenticatedAppServer,
+  validateDedicatedCodexHome,
   type AuthenticatedProbeOptions
 } from "../scripts/probes/app-server-authenticated.js";
+import {
+  CODEX_SYSTEM_SKILLS_DIRECTORIES,
+  CODEX_SYSTEM_SKILLS_FILES
+} from "../scripts/probes/codex-home.js";
 import { supportsAuthenticatedAppServerPlatform } from "../scripts/probes/codex-process.js";
 
 const EXPECTED_FIXED_ARGS = [
@@ -41,6 +46,8 @@ const EXPECTED_FIXED_ARGS = [
   "computer_use",
   "--disable",
   "image_generation",
+  "--disable",
+  "goals",
   "--disable",
   "hooks",
   "--disable",
@@ -92,7 +99,7 @@ if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(EXPECTED_ARGS)) {
 }
 record("arguments-ok");
 function thread(cwd) {
-  return { cliVersion: MODE === "wrong-cli-version" ? "0.152.0" : "0.151.0", createdAt: 1, cwd, ephemeral: true, id: threadId,
+  return { cliVersion: MODE === "wrong-cli-version" ? "0.154.0" : "0.153.4", createdAt: 1, cwd, ephemeral: true, id: threadId,
     modelProvider: "openai", preview: "", projectId: null, sessionId: "session-synthetic",
     source: "vscode", status: { type: "idle" }, threadSource: "appServer", turns: [], updatedAt: 1 };
 }
@@ -227,10 +234,30 @@ function createFakeCodex(directory: string, mode: string, auditPath: string): st
     `const AUDIT_PATH = ${JSON.stringify(auditPath)};`,
     `const EXPECTED_CODEX_HOME = ${JSON.stringify(codexHome)};`,
     `const EXPECTED_ARGS = ${JSON.stringify(EXPECTED_FIXED_ARGS)};`,
-    `if (process.argv.length === 3 && process.argv[2] === "--version") { console.log("codex-cli " + (MODE === "wrong-cli-version" ? "0.152.0" : "0.151.0")); process.exit(0); }`,
+    `if (process.argv.length === 3 && process.argv[2] === "--version") { console.log("codex-cli " + (MODE === "wrong-cli-version" ? "0.154.0" : "0.153.4")); process.exit(0); }`,
     FAKE_SERVER
   ].join("\n");
   fs.writeFileSync(executable, source, { encoding: "utf8", mode: 0o700 });
+  const logDirectory = path.join(codexHome, "log");
+  const tmpDirectory = path.join(codexHome, "tmp");
+  const arg0Directory = path.join(tmpDirectory, "arg0");
+  const helperDirectory = path.join(arg0Directory, "codex-arg0SYNTH1");
+  fs.mkdirSync(logDirectory, { recursive: true, mode: 0o755 });
+  fs.chmodSync(logDirectory, 0o755);
+  fs.writeFileSync(path.join(logDirectory, "codex-login.log"), "synthetic login diagnostic\n", { mode: 0o600 });
+  fs.chmodSync(path.join(logDirectory, "codex-login.log"), 0o600);
+  fs.mkdirSync(arg0Directory, { recursive: true, mode: 0o700 });
+  fs.chmodSync(tmpDirectory, 0o755);
+  fs.chmodSync(arg0Directory, 0o700);
+  fs.mkdirSync(helperDirectory, { recursive: true, mode: 0o755 });
+  fs.chmodSync(helperDirectory, 0o755);
+  fs.writeFileSync(path.join(helperDirectory, ".lock"), "", { mode: 0o644 });
+  fs.chmodSync(path.join(helperDirectory, ".lock"), 0o644);
+  for (const helper of ["applypatch", "apply_patch", "codex-execve-wrapper"]) {
+    const target = path.join(helperDirectory, helper);
+    try { fs.unlinkSync(target); } catch {}
+    fs.symlinkSync(executable, target);
+  }
   return executable;
 }
 
@@ -261,6 +288,24 @@ function options(executable: string): AuthenticatedProbeOptions {
   };
 }
 
+function createSystemSkillsFixture(codexHome: string): string {
+  const system = path.join(codexHome, "skills", ".system");
+  fs.mkdirSync(system, { recursive: true, mode: 0o755 });
+  fs.chmodSync(path.join(codexHome, "skills"), 0o755);
+  fs.chmodSync(system, 0o755);
+  for (const relative of CODEX_SYSTEM_SKILLS_DIRECTORIES) {
+    const target = path.join(system, relative);
+    fs.mkdirSync(target, { recursive: true, mode: 0o755 });
+    fs.chmodSync(target, 0o755);
+  }
+  for (const relative of CODEX_SYSTEM_SKILLS_FILES) {
+    const target = path.join(system, relative);
+    fs.writeFileSync(target, "synthetic system skill fixture\n", { mode: 0o644 });
+    fs.chmodSync(target, 0o644);
+  }
+  return system;
+}
+
 const supportedPlatform = supportsAuthenticatedAppServerPlatform(process.platform);
 
 test("authenticated probe uses the fixed launch, safe preflights, and one identity-preserving tool round-trip", { skip: !supportedPlatform }, async () => {
@@ -287,11 +332,13 @@ test("authenticated probe uses the fixed launch, safe preflights, and one identi
     })();
     assert.deepEqual(receipt, {
       candidate: "app-server-dynamic",
-      codexCliVersion: "0.151.0",
+      codexCliVersion: "0.153.4",
       codexCliSha256: executableSha256,
+      executableProvenance: "unverified",
       authenticationOwner: "codex",
       authenticationStatus: "signed-in",
       configurationIsolation: "dedicated-codex-home",
+      homeStateProvenance: "current-user-owned-allowlist",
       credentialHandling: "codex-owned",
       credentialStore: "effective-file",
       signedOutPreflight: "passed",
@@ -440,10 +487,63 @@ test("authenticated probe reuses only the pinned Codex runtime layout", { skip: 
     for (const name of ["goals_1.sqlite", "logs_2.sqlite-shm", "memories_1.sqlite-wal", "queue_1.sqlite", "state_5.sqlite"]) {
       fs.writeFileSync(path.join(codexHome, name), "", { mode: 0o644 });
     }
-    fs.mkdirSync(path.join(codexHome, "skills"), { mode: 0o755 });
-    fs.mkdirSync(path.join(codexHome, "tmp"), { mode: 0o755 });
+    fs.mkdirSync(path.join(codexHome, "tmp"), { mode: 0o755, recursive: true });
     const receipt = await probeAuthenticatedAppServer(options(executable));
     assert.equal(receipt.dynamicToolRoundTrip, "passed");
+  });
+});
+
+test("dedicated Codex home accepts the observed 0.153.4 helper layout and rejects drift", { skip: !supportedPlatform }, async () => {
+  await withTemporaryDirectory(async (directory) => {
+    const executable = createFakeCodex(directory, "success", path.join(directory, "layout.log"));
+    const codexHome = options(executable).codexHome;
+    const trustedExecutable = fs.realpathSync(executable);
+    validateDedicatedCodexHome(codexHome, trustedExecutable);
+
+    const system = createSystemSkillsFixture(codexHome);
+    validateDedicatedCodexHome(codexHome, trustedExecutable);
+    fs.mkdirSync(path.join(codexHome, "skills", "injected"), { mode: 0o755 });
+    assert.throws(() => validateDedicatedCodexHome(codexHome, trustedExecutable), /authenticated app server probe failed/);
+    fs.rmdirSync(path.join(codexHome, "skills", "injected"));
+    const driftedSkill = path.join(system, "imagegen", "SKILL.md");
+    fs.unlinkSync(driftedSkill);
+    assert.throws(() => validateDedicatedCodexHome(codexHome, trustedExecutable), /authenticated app server probe failed/);
+    fs.writeFileSync(driftedSkill, "synthetic system skill fixture\n", { mode: 0o644 });
+    fs.chmodSync(driftedSkill, 0o644);
+
+    const linkedSkill = path.join(system, "imagegen", "LICENSE.txt");
+    fs.unlinkSync(linkedSkill);
+    fs.symlinkSync(path.join(directory, "outside-skill"), linkedSkill);
+    assert.throws(() => validateDedicatedCodexHome(codexHome, trustedExecutable), /authenticated app server probe failed/);
+    fs.unlinkSync(linkedSkill);
+    fs.writeFileSync(linkedSkill, "synthetic system skill fixture\n", { mode: 0o644 });
+    fs.chmodSync(linkedSkill, 0o644);
+
+    const oversizedSkill = path.join(system, "openai-docs", "SKILL.md");
+    fs.writeFileSync(oversizedSkill, Buffer.alloc(512 * 1024 + 1, 0x78), { mode: 0o644 });
+    assert.throws(() => validateDedicatedCodexHome(codexHome, trustedExecutable), /authenticated app server probe failed/);
+    fs.writeFileSync(oversizedSkill, "synthetic system skill fixture\n", { mode: 0o644 });
+    fs.chmodSync(oversizedSkill, 0o644);
+
+    const log = path.join(codexHome, "log", "codex-login.log");
+    fs.chmodSync(log, 0o644);
+    assert.throws(() => validateDedicatedCodexHome(codexHome, trustedExecutable), /authenticated app server probe failed/);
+    fs.chmodSync(log, 0o600);
+
+    const helperDirectory = path.join(codexHome, "tmp", "arg0", "codex-arg0SYNTH1");
+    const helper = path.join(helperDirectory, "applypatch");
+    fs.unlinkSync(helper);
+    fs.symlinkSync(path.join(directory, "not-the-codex"), helper);
+    assert.throws(() => validateDedicatedCodexHome(codexHome, trustedExecutable), /authenticated app server probe failed/);
+    fs.unlinkSync(helper);
+    fs.symlinkSync(executable, helper);
+
+    fs.rmSync(helperDirectory, { recursive: true, force: true });
+    assert.doesNotThrow(() => validateDedicatedCodexHome(codexHome, trustedExecutable));
+
+    const arg0Directory = path.join(codexHome, "tmp", "arg0");
+    fs.writeFileSync(path.join(arg0Directory, "unexpected"), "", { mode: 0o600 });
+    assert.throws(() => validateDedicatedCodexHome(codexHome, trustedExecutable), /authenticated app server probe failed/);
   });
 });
 

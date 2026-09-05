@@ -1,6 +1,11 @@
 {
   "schemaVersion": 1,
   "mode": "isolated-lifecycle",
+  "provenance": {
+    "format": "gcr-probe-build/v1",
+    "routerVersion": "0.1.0",
+    "probeBuildSha256": "0465b736fd2d6234995c68113ecbdb59713f2df853434b9ab93bfcdf720511a4"
+  },
   "reports": [
     {
       "candidate": "direct",
@@ -81,14 +86,23 @@
   },
   "lifecycle": {
     "candidate": "app-server-dynamic",
+    "codexCliVersion": "0.153.4",
+    "codexCliSha256": "88ecd2cbf8044832a49e7710394d9d328f7205fa5e8c8ebbdd015e002b4f6e21",
+    "executableProvenance": "unverified",
     "protocol": "stdio-jsonl",
     "authenticationOwner": "codex",
     "authenticationStatus": "signed-out",
+    "systemSkillsDigest": "ba0bebe2865fed921173fbbd469130555bc897d77644837bfb867874cc697832",
+    "credentialStore": "effective-file",
     "modelStatus": "available",
+    "mcpIsolation": "disabled-before-turn",
+    "hookIsolation": "configured-and-quiet",
     "threadPolicy": "ephemeral-read-only-no-network",
     "threadStart": "accepted",
     "postStartAudit": "quiet",
-    "directProcess": "closed",
+    "processGroup": "closed",
+    "processContainment": "same-process-group-only",
+    "startupIsolation": "observed-after-start",
     "releaseEligibility": "blocked"
   }
 }

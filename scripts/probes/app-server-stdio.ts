@@ -16,6 +16,7 @@ import {
 } from "./app-server-candidate.js";
 import type { BridgeEvent, CallId } from "./bridge-contract.js";
 import { ISOLATED_APP_SERVER_ARGS } from "./app-server-launch.js";
+import { readCodexSystemSkillsDigest, type CodexSystemSkillsDigest } from "./codex-home.js";
 import {
   isolatedCodexEnvironment,
   PINNED_CODEX_CLI_VERSION,
@@ -93,11 +94,13 @@ type DynamicToolLease = Extract<AppServerParseResult, { readonly kind: "tool-han
 
 export interface AppServerLifecycleReceipt {
   readonly candidate: "app-server-dynamic";
-  readonly codexCliVersion: "0.151.0";
+  readonly codexCliVersion: typeof PINNED_CODEX_CLI_VERSION;
   readonly codexCliSha256: string;
+  readonly executableProvenance: "unverified";
   readonly protocol: "stdio-jsonl";
   readonly authenticationOwner: "codex";
   readonly authenticationStatus: "signed-out";
+  readonly systemSkillsDigest: CodexSystemSkillsDigest;
   readonly credentialStore: "effective-file";
   readonly modelStatus: "available";
   readonly mcpIsolation: "disabled-before-turn";
@@ -216,13 +219,16 @@ export async function probeIsolatedAppServerLifecycle(
       await client.startThread();
       await client.verifyThreadIsolation();
       await client.auditUntilIdle(100);
+      const systemSkillsDigest = readCodexSystemSkillsDigest(isolatedCodexHome);
       return {
         candidate: "app-server-dynamic",
         codexCliVersion: PINNED_CODEX_CLI_VERSION,
         codexCliSha256,
+        executableProvenance: "unverified",
         protocol: "stdio-jsonl",
         authenticationOwner: "codex",
         authenticationStatus,
+        systemSkillsDigest,
         credentialStore: "effective-file",
         modelStatus: "available",
         mcpIsolation: "disabled-before-turn",
@@ -841,6 +847,7 @@ function isolationConfig(mcpServerNames: readonly string[], hookKeys: readonly s
     features: {
       apps: false,
       auth_elicitation: false,
+      goals: false,
       hooks: false,
       memories: false,
       plugin_sharing: false,

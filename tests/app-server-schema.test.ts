@@ -49,9 +49,10 @@ function writeSchemas(stable: string, experimental: string): { readonly stableBu
 test("schema inspector records version-derived hashes and the experimental boundary", () => {
   withSchemaDirectories((stable, experimental) => {
     const bundles = writeSchemas(stable, experimental);
-    assert.deepEqual(inspectAppServerSchemaDirectories(stable, experimental, "0.151.0"), {
+    assert.deepEqual(inspectAppServerSchemaDirectories(stable, experimental, "0.153.4", "shape-only"), {
       protocolVersion: "v2",
-      cliVersion: "0.151.0",
+      cliVersion: "0.153.4",
+      inspectionMode: "shape-only",
       stableBundleSha256: crypto.createHash("sha256").update(bundles.stableBundle).digest("hex"),
       experimentalBundleSha256: crypto.createHash("sha256").update(bundles.experimentalBundle).digest("hex"),
       stableDynamicTools: false,
@@ -61,31 +62,45 @@ test("schema inspector records version-derived hashes and the experimental bound
   });
 });
 
+test("pinned schema inspection rejects an unpinned version and shape-compatible digest drift", () => {
+  withSchemaDirectories((stable, experimental) => {
+    writeSchemas(stable, experimental);
+    assert.throws(
+      () => inspectAppServerSchemaDirectories(stable, experimental, "0.154.0"),
+      /schema probe failure/
+    );
+    assert.throws(
+      () => inspectAppServerSchemaDirectories(stable, experimental, "0.153.4"),
+      /schema probe failure/
+    );
+  });
+});
+
 test("schema inspector fails closed on drift, malformed files, symlinks, and versions", () => {
   withSchemaDirectories((stable, experimental) => {
     writeSchemas(stable, experimental);
     assert.throws(() => inspectAppServerSchemaDirectories(stable, experimental, "not-a-version"), /schema probe failure/);
 
     fs.writeFileSync(path.join(stable, "v2", "ThreadStartParams.json"), JSON.stringify({ properties: { dynamicTools: {} } }));
-    assert.throws(() => inspectAppServerSchemaDirectories(stable, experimental, "0.151.0"), /schema probe failure/);
+    assert.throws(() => inspectAppServerSchemaDirectories(stable, experimental, "0.153.4"), /schema probe failure/);
 
     fs.writeFileSync(path.join(stable, "v2", "ThreadStartParams.json"), "not-json");
-    assert.throws(() => inspectAppServerSchemaDirectories(stable, experimental, "0.151.0"), /schema probe failure/);
+    assert.throws(() => inspectAppServerSchemaDirectories(stable, experimental, "0.153.4"), /schema probe failure/);
 
     writeSchemas(stable, experimental);
     fs.writeFileSync(path.join(experimental, "v2", "ThreadStartParams.json"), JSON.stringify({ properties: {
       dynamicTools: false
     } }));
-    assert.throws(() => inspectAppServerSchemaDirectories(stable, experimental, "0.151.0"), /schema probe failure/);
+    assert.throws(() => inspectAppServerSchemaDirectories(stable, experimental, "0.153.4"), /schema probe failure/);
 
     writeSchemas(stable, experimental);
     fs.writeFileSync(path.join(experimental, "codex_app_server_protocol.v2.schemas.json"), "not-json");
-    assert.throws(() => inspectAppServerSchemaDirectories(stable, experimental, "0.151.0"), /schema probe failure/);
+    assert.throws(() => inspectAppServerSchemaDirectories(stable, experimental, "0.153.4"), /schema probe failure/);
 
     writeSchemas(stable, experimental);
     fs.unlinkSync(path.join(stable, "codex_app_server_protocol.v2.schemas.json"));
     fs.symlinkSync(path.join(experimental, "codex_app_server_protocol.v2.schemas.json"), path.join(stable, "codex_app_server_protocol.v2.schemas.json"));
-    assert.throws(() => inspectAppServerSchemaDirectories(stable, experimental, "0.151.0"), /schema probe failure/);
+    assert.throws(() => inspectAppServerSchemaDirectories(stable, experimental, "0.153.4"), /schema probe failure/);
   });
 });
 
@@ -135,7 +150,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 if (process.argv.includes("--version")) {
-  process.stdout.write("codex-cli 0.151.0\\n");
+  process.stdout.write("codex-cli 0.153.4\\n");
   process.exit(0);
 }
 const outputIndex = process.argv.indexOf("--out");
@@ -156,9 +171,10 @@ process.exit(0);
   try {
     fs.writeFileSync(executable, wrapper, { mode: 0o700 });
     process.env.PATH = directory;
-    const receipt = await probeInstalledAppServerSchemas({ timeoutMs: 2_000 });
-    assert.equal(receipt.cliVersion, "0.151.0");
+    const receipt = await probeInstalledAppServerSchemas({ timeoutMs: 2_000, inspectionMode: "shape-only" });
+    assert.equal(receipt.cliVersion, "0.153.4");
     assert.match(receipt.codexCliSha256 ?? "", /^[a-f0-9]{64}$/);
+    assert.equal(receipt.executableProvenance, "unverified");
     assert.equal(receipt.processContainment, "same-process-group-only");
     const pids = fs.readFileSync(pidFile, "utf8").trim().split("\n").map(Number);
     assert.equal(pids.length, 2);

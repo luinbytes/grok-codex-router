@@ -5,7 +5,19 @@ import path from "node:path";
 import type { Readable } from "node:stream";
 import { TextDecoder } from "node:util";
 
-export const PINNED_CODEX_CLI_VERSION = "0.151.0";
+export interface CodexCompatibilityProfile {
+  readonly cliVersion: string;
+  readonly stableSchemaBundleSha256: string;
+  readonly experimentalSchemaBundleSha256: string;
+}
+
+export const CODEX_COMPATIBILITY = Object.freeze({
+  cliVersion: "0.153.4",
+  stableSchemaBundleSha256: "d3eace08be5dca386bfd1f1e8df650058b4113f1e10870a284d775d75517576a",
+  experimentalSchemaBundleSha256: "e5f798fd1343c539f01fedea0e8a84a43c080fcca4615c80eb04a5edab4f7d0a"
+} as const satisfies CodexCompatibilityProfile);
+
+export const PINNED_CODEX_CLI_VERSION = CODEX_COMPATIBILITY.cliVersion;
 const MAX_OWNED_CODEX_OUTPUT_BYTES = 64 * 1024;
 const DEFAULT_OWNED_CODEX_TIMEOUT_MS = 15_000;
 const MAX_OWNED_CODEX_TIMEOUT_MS = 60_000;
@@ -54,7 +66,7 @@ export function isolatedCodexEnvironment(codexHome: string): NodeJS.ProcessEnv {
   const result: NodeJS.ProcessEnv = { CODEX_HOME: codexHome };
   const safePath = safeSearchPath();
   if (safePath !== undefined) result.PATH = safePath;
-  for (const name of ["PATHEXT", "SystemRoot", "WINDIR", "COMSPEC", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE"]) {
+  for (const name of ["PATHEXT", "SystemRoot", "WINDIR", "COMSPEC", "LANG", "LC_ALL", "LC_CTYPE"]) {
     const value = process.env[name];
     if (value !== undefined) result[name] = value;
   }

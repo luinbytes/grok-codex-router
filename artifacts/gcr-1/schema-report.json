@@ -1,6 +1,11 @@
 {
   "schemaVersion": 1,
   "mode": "schemas-only",
+  "provenance": {
+    "format": "gcr-probe-build/v1",
+    "routerVersion": "0.1.0",
+    "probeBuildSha256": "0465b736fd2d6234995c68113ecbdb59713f2df853434b9ab93bfcdf720511a4"
+  },
   "reports": [
     {
       "candidate": "direct",
@@ -81,11 +86,15 @@
   },
   "schema": {
     "protocolVersion": "v2",
-    "cliVersion": "0.151.0",
-    "stableBundleSha256": "2442b15801bc019ad55987ad03e0f0ae60c51417825b9b6d708db640e6c2651c",
-    "experimentalBundleSha256": "a586cdc50f84c56c7654387e869b470a689796fa1c57678dcafb5921bb2d5255",
+    "cliVersion": "0.153.4",
+    "inspectionMode": "pinned",
+    "stableBundleSha256": "d3eace08be5dca386bfd1f1e8df650058b4113f1e10870a284d775d75517576a",
+    "experimentalBundleSha256": "e5f798fd1343c539f01fedea0e8a84a43c080fcca4615c80eb04a5edab4f7d0a",
     "stableDynamicTools": false,
     "experimentalDynamicTools": true,
-    "releaseEligibility": "blocked"
+    "releaseEligibility": "blocked",
+    "codexCliSha256": "88ecd2cbf8044832a49e7710394d9d328f7205fa5e8c8ebbdd015e002b4f6e21",
+    "executableProvenance": "unverified",
+    "processContainment": "same-process-group-only"
   }
 }

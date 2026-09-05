@@ -31,6 +31,8 @@ export const ISOLATED_APP_SERVER_ARGS: readonly string[] = Object.freeze([
   "--disable",
   "image_generation",
   "--disable",
+  "goals",
+  "--disable",
   "hooks",
   "--disable",
   "memories",

@@ -26,7 +26,7 @@ async function withTestRoot<T>(callback: (root: string) => Promise<T>): Promise<
   }
 }
 
-function createCodex(root: string, version = PINNED_CODEX_CLI_VERSION): { readonly bin: string; readonly executable: string; readonly home: string } {
+function createCodex(root: string, version: string = PINNED_CODEX_CLI_VERSION): { readonly bin: string; readonly executable: string; readonly home: string } {
   const bin = path.join(root, "bin");
   const home = path.join(root, "codex-home");
   fs.mkdirSync(bin, { mode: 0o700 });
@@ -84,6 +84,23 @@ test("platform support is restricted to Darwin and Linux process groups", () => 
   assert.equal(supportsOwnedProcessGroup("linux"), true);
   assert.equal(supportsOwnedProcessGroup("win32"), false);
   assert.equal(supportsOwnedProcessGroup("freebsd"), false);
+});
+
+test("isolated Codex environment does not inherit caller-selected temporary directories", () => {
+  const previous = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP };
+  try {
+    process.env.TMPDIR = "/private/caller-tmpdir";
+    process.env.TMP = "/private/caller-tmp";
+    process.env.TEMP = "/private/caller-temp";
+    const environment = isolatedCodexEnvironment("/private/router-codex-home");
+    assert.equal(environment.TMPDIR, undefined);
+    assert.equal(environment.TMP, undefined);
+    assert.equal(environment.TEMP, undefined);
+  } finally {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  }
 });
 
 test("resolver skips relative and hostile PATH entries and proves the exact pinned CLI", { skip: !SUPPORTED }, async () => {

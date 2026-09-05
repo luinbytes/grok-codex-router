@@ -265,6 +265,8 @@ function parseNotification(raw: Record<string, unknown>, context: AppServerCandi
       return parseTurnStarted(params, context, identities.callScopes);
     case "thread/started":
       return parseThreadStarted(params, context);
+    case "thread/status/changed":
+      return parseThreadStatusChanged(params, context);
     case "remoteControl/status/changed":
       return parseRemoteControlStatus(params);
     case "turn/completed":
@@ -579,6 +581,23 @@ function parseThreadStarted(params: Record<string, unknown>, context: AppServerC
   if (!isThreadSummary(thread) || thread.id !== context.activeThreadId) return rejected("protocol-failure");
   const itemFault = auditThreadTurns(thread.turns, context);
   return itemFault === undefined ? accepted() : rejected(itemFault);
+}
+
+function parseThreadStatusChanged(params: Record<string, unknown>, context: AppServerCandidateContext): AppServerParseResult {
+  if (context.activeThreadId === undefined || !hasOnlyKeys(params, ["status", "threadId"])
+    || params.threadId !== context.activeThreadId || !isJsonObject(params.status)) return rejected("protocol-failure");
+  if (params.status.type === "active") {
+    return context.activeTurnId !== undefined
+      && hasOnlyKeys(params.status, ["activeFlags", "type"])
+      && Array.isArray(params.status.activeFlags)
+      && params.status.activeFlags.length === 0
+      ? accepted()
+      : rejected("forbidden-built-in");
+  }
+  return params.status.type === "idle"
+    && hasOnlyKeys(params.status, ["type"])
+    ? accepted()
+    : rejected("protocol-failure");
 }
 
 function parseRemoteControlStatus(params: Record<string, unknown>): AppServerParseResult {

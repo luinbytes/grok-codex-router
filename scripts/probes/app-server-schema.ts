@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  CODEX_COMPATIBILITY,
   PINNED_CODEX_CLI_VERSION,
   resolvePinnedCodexExecutable,
   runOwnedCodexCommand,
@@ -17,7 +18,9 @@ const MAX_SCHEMA_TIMEOUT_MS = 60_000;
 export interface AppServerSchemaReceipt {
   readonly protocolVersion: "v2";
   readonly cliVersion: string;
+  readonly inspectionMode: AppServerSchemaInspectionMode;
   readonly codexCliSha256?: string;
+  readonly executableProvenance?: "unverified";
   readonly stableBundleSha256: string;
   readonly experimentalBundleSha256: string;
   readonly stableDynamicTools: false;
@@ -28,14 +31,19 @@ export interface AppServerSchemaReceipt {
 
 export interface AppServerSchemaProbeOptions {
   readonly timeoutMs?: number;
+  readonly inspectionMode?: AppServerSchemaInspectionMode;
 }
+
+export type AppServerSchemaInspectionMode = "pinned" | "shape-only";
 
 export function inspectAppServerSchemaDirectories(
   stableDirectory: string,
   experimentalDirectory: string,
-  cliVersion: string
+  cliVersion: string,
+  mode: AppServerSchemaInspectionMode = "pinned"
 ): AppServerSchemaReceipt {
-  if (!isVersion(cliVersion)) throw schemaError();
+  if (!isVersion(cliVersion) || (mode !== "pinned" && mode !== "shape-only")
+    || (mode === "pinned" && cliVersion !== PINNED_CODEX_CLI_VERSION)) throw schemaError();
   const stableBundle = readBoundedFile(
     path.join(stableDirectory, "codex_app_server_protocol.v2.schemas.json"),
     MAX_SCHEMA_BUNDLE_BYTES
@@ -51,11 +59,17 @@ export function inspectAppServerSchemaDirectories(
   const stableDynamicTools = dynamicToolsShape(stableThread);
   const experimentalDynamicTools = dynamicToolsShape(experimentalThread);
   if (stableDynamicTools !== "absent" || experimentalDynamicTools !== "valid") throw schemaError();
+  const stableBundleSha256 = crypto.createHash("sha256").update(stableBundle).digest("hex");
+  const experimentalBundleSha256 = crypto.createHash("sha256").update(experimentalBundle).digest("hex");
+  if (mode === "pinned"
+    && (stableBundleSha256 !== CODEX_COMPATIBILITY.stableSchemaBundleSha256
+      || experimentalBundleSha256 !== CODEX_COMPATIBILITY.experimentalSchemaBundleSha256)) throw schemaError();
   return {
     protocolVersion: "v2",
     cliVersion,
-    stableBundleSha256: crypto.createHash("sha256").update(stableBundle).digest("hex"),
-    experimentalBundleSha256: crypto.createHash("sha256").update(experimentalBundle).digest("hex"),
+    inspectionMode: mode,
+    stableBundleSha256,
+    experimentalBundleSha256,
     stableDynamicTools: false,
     experimentalDynamicTools: true,
     releaseEligibility: "blocked"
@@ -88,8 +102,9 @@ export async function probeInstalledAppServerSchemas(options: AppServerSchemaPro
       timeoutMs
     });
     return {
-      ...inspectAppServerSchemaDirectories(stable, experimental, PINNED_CODEX_CLI_VERSION),
+      ...inspectAppServerSchemaDirectories(stable, experimental, PINNED_CODEX_CLI_VERSION, options.inspectionMode),
       codexCliSha256: codex.sha256,
+      executableProvenance: "unverified",
       processContainment: "same-process-group-only"
     };
   } catch {
@@ -152,8 +167,9 @@ function validateProtocolBundle(bytes: Buffer): void {
 
 function validateOptions(options: AppServerSchemaProbeOptions): void {
   try {
-    if (!isPlainRecord(options) || !hasOnlyKeys(options, ["timeoutMs"])
-      || (options.timeoutMs !== undefined && (!isPositiveInteger(options.timeoutMs) || options.timeoutMs > MAX_SCHEMA_TIMEOUT_MS))) {
+    if (!isPlainRecord(options) || !hasOnlyKeys(options, ["timeoutMs", "inspectionMode"])
+      || (options.timeoutMs !== undefined && (!isPositiveInteger(options.timeoutMs) || options.timeoutMs > MAX_SCHEMA_TIMEOUT_MS))
+      || (options.inspectionMode !== undefined && options.inspectionMode !== "pinned" && options.inspectionMode !== "shape-only")) {
       throw schemaError();
     }
   } catch {

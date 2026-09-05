@@ -1,5 +1,7 @@
 # GCR-1 grounding
 
+> Historical snapshot from Codex CLI 0.151.0. See `docs/transport-decision.md` for the current compatibility evidence and release decision.
+
 ## Existing flow
 
 `scripts/patch-host.ts` injects `createCodexRouterSession()` into the Grok host. `src/session.ts` keeps one executor per immutable Grok conversation and workload. Each turn calls `executeCodexTurn()` in `src/turn-execution.ts`.
