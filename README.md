@@ -1,149 +1,147 @@
 # Grok Codex Router
 
+[![CI](https://github.com/luinbytes/grok-codex-router/actions/workflows/ci.yml/badge.svg)](https://github.com/luinbytes/grok-codex-router/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Status: experimental and installation blocked](https://img.shields.io/badge/status-experimental%20%7C%20installation--blocked-orange.svg)](docs/install.md)
+
 > [!WARNING]
-> This is an unofficial experimental project. It patches Grok Bot and uses a private ChatGPT Codex endpoint that can change without notice. It may break your VM, lose work, violate service terms, or get an account restricted or banned. You use it entirely at your own risk. The author accepts no responsibility for broken installations, lost data, account action, or anything else that goes sideways.
+> This is an unofficial experimental project. It patches Grok Bot and uses a private ChatGPT Codex endpoint that can change without notice. It may break a Sand VM, lose work, violate service terms, or get an account restricted or banned. Use it at your own risk.
 
-Run Grok Bot on your ChatGPT Codex subscription without replacing Grok Bot's interface, tools, permissions, or agent loop.
+Grok Codex Router connects Grok Bot to the ChatGPT Codex Responses endpoint without replacing Grok Bot's interface, tools, permissions, or agent loop. It routes GPT-5.6 models per agent and keeps background workloads configurable.
 
-The router connects Grok Bot directly to the ChatGPT Codex Responses endpoint. It reuses an existing Pi or Codex CLI login, routes GPT-5.6 models and reasoning per agent, and keeps Grok Bot's background workloads independently configurable.
+This repository is a public-release preparation fork of the router originally authored by [Igor Warzocha](https://github.com/IgorWarzocha). The [MIT license](LICENSE) and its attribution remain in force.
 
-## Requirements
+## Release status
 
-- A Grok Bot Sand VM
-- Node.js 22.19 or newer
-- Bun 1.4 or newer
-- An existing OpenAI Codex OAuth login from Pi or Codex CLI
+The public installation gate is blocked. This repository does not publish a supported release or claim that the router is ready for general installation.
 
-The router does not include a login flow. If neither local account is usable, installation stops without modifying authentication.
+The current evidence has these limits:
+
+- No App Server bridge is selected. `SELECTED_BRIDGE=none` remains required.
+- The direct Responses transport is a fixture and comparison baseline. Its credential owner is not the Codex CLI, so it is not eligible for release.
+- The native Grok Bot validation matrix has not run.
+- Codex CLI update and rollback support is design-only. No updater or rollback command ships here.
+
+Read [the installation gate](docs/install.md) before running any installer command. While the gate is blocked, `./install.sh` stops before dependency installation, authentication, or host mutation.
+
+## Intended runtime
+
+The intended runtime is a Grok Bot Sand VM on Linux x64 or Linux arm64. The project does not promise support for Windows, generic Linux hosts, macOS, or other architectures.
+
+Local checks can run on a development machine. Passing local checks does not prove that a Sand VM, Grok Bot host, provider account, or native tool turn works.
 
 ## Install
 
+Use the shell entry point to inspect readiness:
+
 ```bash
-git clone https://github.com/IgorWarzocha/grok-codex-router.git ~/grok-codex-router
+git clone https://github.com/luinbytes/grok-codex-router.git ~/grok-codex-router
 cd ~/grok-codex-router
-./install.sh
+node --version
+./install.sh --check
+./install.sh --check --json
 ```
 
-The installer builds and checks the router, selects an existing authenticated account, applies the Sand host patch, starts the local control service, restarts Grok Bot safely, and completes a real cached tool round-trip.
+Install Node.js 22.19 or newer before running the check. The portable check uses Node.js and does not require Bun.
 
-Open the control UI inside the VM:
+The JSON preflight is also available directly:
 
-```text
-http://127.0.0.1:21371
+```bash
+node scripts/install-preflight.cjs --json
 ```
+
+The result uses `schemaVersion: 1`. It reports `status`, `selectedBridge`, and a `blockers` array with machine-readable `code` values. A blocked result is a stop condition. Do not run login, dependency installation, host patching, service startup, or a native turn after it.
+
+The no-argument installer is reserved for a future eligible release. It fails closed while the public gate is blocked. Do not bypass that check with a manual package install or a copied host bundle.
+
+The installer and `recover` command are gated. Other legacy CLI commands such as `patch-host`, `restart-host`, `service-start`, `service-restart`, `service-stop`, `on`, and `off` are not supported public installation paths. Do not use them to bypass a blocked preflight.
+
+The dependency-install ban applies to public setup and recovery. An authorized developer may install locked dependencies in an isolated checkout for portable tests. That does not install the router or clear the release gate.
+
+See [Install the router](docs/install.md) for the full preflight contract and [Install for agents](docs/agent-install.md) for Codex-compatible agent workflows.
+
+## Agent installation
+
+The repository includes a self-contained workflow at [`.agents/skills/grok-codex-router/SKILL.md`](.agents/skills/grok-codex-router/SKILL.md). A Codex-compatible agent must run the same preflight as the shell installer and stop when the result is blocked.
+
+The shell installer and the agent workflow are two entry points to the same safety boundary. Neither entry point starts authentication or changes an installed Grok Bot while the gate is blocked.
 
 ## Configure routing
 
-The UI is the normal management surface.
+Configuration is managed through the local control UI or the CLI after an eligible installation.
 
 - **Default** sets the model and reasoning used by ordinary agents.
-- **Agents** adds an override for one discovered individual Grok Bot profile. Chat rooms are excluded.
+- **Agents** adds an override for one discovered Grok Bot profile.
 - **Task models** controls summarization, subagents, browser use, computer use, automations, and group turns.
-- **Settings** selects the authenticated local account and transport mode.
-- **Stats** shows token use, prompt-cache reads, inference time, and failures by agent.
-- **Activity** shows sanitized recent routing and transport events.
+- **Settings** selects an existing local credential store and transport mode.
+- **Stats** shows retained token and latency fields.
+- **Activity** shows sanitized routing and transport events.
 
-Agent settings are stored against immutable profile IDs. Renaming an agent does not break its route. Agents speaking inside a chat room use the separate **Group turns** setting.
+Read [Configuration](docs/configuration.md) for the file schema, environment variables, and CLI commands. The router does not provide a login flow and must not copy or inspect credential contents.
 
-The UI offers GPT-5.6 Sol, Luna, and Terra. An agent can inherit the complete default route or override both model and reasoning effort.
+The router does not provide a sandbox. It runs inside the existing Sand and Grok Bot permission boundary. Do not treat the router as isolation from the host, account, or provider.
 
-Settings gives Sol, Luna, and Terra independent effective context windows of 272k, 472k, or 872k tokens. The router reports the selected model's window to Grok Bot so native compaction uses the same budget. It does not send an unsupported context-limit field to Codex. Each model defaults to 272k.
+## Transport and routing behavior
 
-## Switch inference source
+The production router supports cached WebSocket, WebSocket, and SSE modes. Cached WebSocket is the default. It sends a continuation delta only after validating the prior request and reconstructed response prefix.
 
-Use **Switch off** in the UI to return Grok Bot to its native inference. The host patch, control service, routes, and usage history stay in place, so **Switch on** restores Codex routing without reinstalling anything.
+Every request keeps a stable prompt-cache identity for its workload. Provider-reported cache reads and token use appear in retained statistics. Codex turn state remains connected across native tool calls and transport retries.
 
-The same actions are available from the CLI:
+The UI and CLI can switch the saved inference source for new sessions:
 
 ```bash
 grok-codex-router off
 grok-codex-router on
 ```
 
-The switch applies when Grok Bot creates its next inference session. A turn already in progress finishes on its current source. No host restart is needed.
+An active turn finishes on its current source. The switch does not restart the host.
 
-## Choose a transport
+These routing controls describe the existing router behavior. They do not select a public-release bridge or clear the release gate.
 
-| Mode | Behavior |
-| --- | --- |
-| Cached WebSocket | Default. Reuses a live socket and sends a continuation delta only after validating the complete prior request and reconstructed response prefix. |
-| WebSocket | Reuses a live socket but sends complete request history. |
-| SSE | Sends complete request history over HTTP streaming. Also used as the automatic fallback when WebSocket transport is unavailable. |
+## Verify changes
 
-A dead connection is replaced when the next request needs it. The router does not expire sockets, continuation state, or OpenAI prompt caching by age.
-
-Every request keeps a stable prompt-cache identity for its agent workload. Provider-reported cache reads and token use appear in Stats. Codex turn state is retained through native tool calls and transport retries.
-
-## Verify the VM
-
-Run the local contract suite after changing the router or after a suspicious Sand update:
+Use the portable checks for source and documentation changes:
 
 ```bash
-cd ~/grok-codex-router
+npm run check:portable
+```
+
+The portable check performs a clean build, runs Knip, runs the non-VM test suite, and tests shell readiness behavior. Run the live VM checks only inside the intended Sand environment:
+
+```bash
+npm run check:vm
+```
+
+The existing full gate remains available with Bun:
+
+```bash
 bun run check
 ```
 
-This suite does not contact OpenAI. It tests router-owned translation, routing, continuation, recovery, stream decoding, and resource cleanup. It also checks the live VM's host compatibility, patch state, package entrypoint, Sand supervisor, Bun runtime, agent discovery, local OAuth ownership, service state, and private file permissions.
+The full gate includes VM contracts. None of these commands substitutes for the missing native Grok validation matrix. Read [Development](docs/development.md) for the check boundary.
 
-Run the explicit provider smoke check separately:
+## Recovery and updates
 
-```bash
-grok-codex-router verify
-```
+The checked-in recovery and update material is a design record. It does not ship an updater, a candidate store, or a rollback command.
 
-`verify` performs a two-request tool round-trip on a synthetic diagnostic identity. The second request must reuse the cached WebSocket and send only the tool-result tail.
-
-Finish deployment verification with one native Grok Bot turn that uses a harmless tool and returns through Grok Bot's normal delivery tool.
-
-## Updates and recovery
-
-The local service checks changed Sand host bundles before modifying them.
-
-- A compatible installed patch is left alone.
-- A compatible unpatched update is patched and restarted through Sand's supervisor.
-- An unfamiliar host is left untouched and reported as incompatible.
-- A partial patch or missing pristine backup fails closed.
-
-For a failed recovery:
+Do not use `git pull` as an update mechanism for an installed router. Do not copy a Sand host backup by hand. Keep the current installation unchanged and record a sanitized diagnostic if an existing installation needs attention:
 
 ```bash
-cd ~/grok-codex-router
-git pull --ff-only
-./install.sh
-grok-codex-router diagnose > /tmp/grok-codex-router-report.md
+grok-codex-router diagnose
 ```
 
-Inspect the report before attaching it to a [GitHub issue](https://github.com/IgorWarzocha/grok-codex-router/issues/new). Never publish the Sand host bundle, OAuth files, prompts, tool arguments, request logs, or authorization data.
+Review the output privately. Never attach the Sand host bundle, OAuth files, prompts, tool arguments, request logs, or authorization data. See [Security](SECURITY.md) before reporting a problem.
 
-The bundled skill in `.agents/skills/grok-codex-router/` gives Codex-compatible agents the safe investigation and recovery procedure.
+## Contributing
 
-## CLI
+Read [Contributing](CONTRIBUTING.md) before changing source, checks, or release documentation. Read [Development](docs/development.md) for the test split and release evidence boundary.
 
-```bash
-grok-codex-router status
-grok-codex-router agents
-grok-codex-router routes
-grok-codex-router off
-grok-codex-router on
-grok-codex-router route "Agent Name" gpt-5.6-sol high
-grok-codex-router class summarization gpt-5.6-luna medium
-grok-codex-router auth-store pi
-grok-codex-router context-window luna 472k
-grok-codex-router recover
-```
+## Project links
 
-Agent names are resolved against live profiles before an immutable ID is saved. `auth-store` accepts only a Pi or Codex CLI store that is already authenticated.
-
-## Privacy and scope
-
-The control server listens only on `127.0.0.1`. Configuration changes require an installation-specific local token. Router telemetry has a fixed safe schema and excludes prompts, message bodies, tool arguments, credentials, account identifiers, and authorization headers.
-
-Inference continues if the control UI is unavailable. The router does not modify Grok Bot transcripts, profiles, native tools, or permissions.
-
-## Remove
-
-```bash
-grok-codex-router service-stop
-cp ~/sand-host/host-main.cjs.grok-codex-router-bak ~/sand-host/host-main.cjs
-grok-codex-router restart-host
-```
+- [Installation gate](docs/install.md)
+- [Agent installation](docs/agent-install.md)
+- [Configuration reference](docs/configuration.md)
+- [Development guide](docs/development.md)
+- [Release readiness](docs/release-readiness.md)
+- [Security policy](SECURITY.md)
+- [Issue tracker](https://github.com/luinbytes/grok-codex-router/issues)
