@@ -58,11 +58,11 @@ The installer and `recover` command are gated. Other legacy CLI commands such as
 
 The dependency-install ban applies to public setup and recovery. An authorized developer may install locked dependencies in an isolated checkout for portable tests. That does not install the router or clear the release gate.
 
-See [Install the router](docs/install.md) for the full preflight contract and [Install for agents](docs/agent-install.md) for Codex-compatible agent workflows.
+See [Install the router](docs/install.md) for the full preflight contract and [Install for agents](docs/agent-install.md) for Grok Bot agents or other assistants with shell access.
 
 ## Agent installation
 
-The repository includes a self-contained workflow at [`.agents/skills/grok-codex-router/SKILL.md`](.agents/skills/grok-codex-router/SKILL.md). A Codex-compatible agent must run the same preflight as the shell installer and stop when the result is blocked.
+The repository includes a self-contained workflow at [`.agents/skills/grok-codex-router/SKILL.md`](.agents/skills/grok-codex-router/SKILL.md). Give your Grok Bot agent the [agent guide](docs/agent-install.md) and ask it to inspect readiness from a separate checkout inside its VM. Any assisting agent must run the same preflight as the shell installer and stop when the result is blocked. Automatic Codex skill discovery is not required to follow the guide.
 
 The shell installer and the agent workflow are two entry points to the same safety boundary. Neither entry point starts authentication or changes an installed Grok Bot while the gate is blocked.
 

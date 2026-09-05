@@ -1,6 +1,6 @@
 # Install for agents
 
-This guide is for a Codex-compatible agent that is asked to install, recover, or inspect Grok Codex Router. It is self-contained. Do not assume access to a personal skill, a private reference file, a credential store, or an installed Grok Bot.
+This guide is for a Grok Bot agent working inside its Sand VM, or another assistant with shell access, that is asked to install, recover, or inspect Grok Codex Router. It is self-contained and does not require Codex-specific skill discovery. Do not assume access to a personal skill, a private reference file, a credential store, or an installed Grok Bot.
 
 ## Start with the preflight
 
